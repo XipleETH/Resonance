@@ -1,14 +1,21 @@
 import { Scene } from 'phaser';
 import * as Phaser from 'phaser';
-import { connectRealtime, type Connection } from '@devvit/web/client';
 import {
+  connectRealtime,
+  exitExpandedMode,
+  getWebViewMode,
+  requestExpandedMode,
+  type Connection,
+} from '@devvit/web/client';
+import {
+  initAudio,
+  isPlaying,
   onStep,
-  setActive,
+  setActiveCells,
   setBpm,
-  setFxs,
   setInstruments,
   setKey,
-  start as startTransport,
+  setPlaying,
 } from '../audio/jamEngine';
 import {
   FLAT_FX,
@@ -101,43 +108,50 @@ function lighten(color: number, amt: number): number {
 }
 
 function defaultState(): JamState {
-  const cells: JamState['cells'] = []; // start clean — no notes
-  const fx: TrackFx[] = [];
-  for (let t = 0; t < TRACKS; t++) fx.push({ ...FLAT_FX });
   return {
     meta: {
       day: 'DÍA 1', key: 'C', scale: 'minor-pentatonic', bpm: 96, bpmMin: 76, bpmMax: 116,
-      t0: 0, steps: STEPS, tracks: TRACKS, version: 1, instruments: ['kick', 'hat', 'bass', '', '', ''], fx,
+      t0: 0, steps: STEPS, tracks: TRACKS, version: 1, instruments: ['kick', 'hat', 'bass', '', '', ''],
     },
-    cells,
+    cells: [],
   };
 }
 
-type WaveDrag = { sx: number; sy: number; d0: number; r0: number; track: number };
+type WaveDrag = { sx: number; sy: number; d0: number; r0: number; cell: string };
 
 export class Game extends Scene {
   private state: JamState = defaultState();
-  private sharedActive = new Set<string>();
+  private sharedCells = new Map<string, { by: string; fx: TrackFx }>();
   private instruments: string[] = [];
-  private fx: TrackFx[] = [];
   private bpm = 96;
+  private myUserId = '';
 
   private draftPlace = new Set<string>();
   private draftRemove = new Set<string>();
   private draftInstr = new Map<number, string>();
-  private draftFx = new Map<number, TrackFx>();
+  private draftCellFx = new Map<string, TrackFx>();
   private draftTempo = 0;
   private selectedTrack = -1;
+  private selectedCell: string | null = null;
   private instrMenuOpen = false;
+  private audioReady = false;
 
   private energy = MAX_FICHAS;
   private channel = '';
   private presence = 1;
   private conn: Connection | null = null;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
+  private active = false; // "woken" — taps act; first touch only wakes (swallowed)
+  private audioId = 'a' + Math.random().toString(36).slice(2);
+  private audioChan: BroadcastChannel | null = null;
+  private pauseHandler = (): void => this.goSleep();
+  private visHandler = (): void => {
+    if (document.hidden) this.goSleep();
+  };
 
   private bg!: Phaser.GameObjects.TileSprite;
   private panel!: Phaser.GameObjects.Graphics;
+  private selRing!: Phaser.GameObjects.Graphics;
   private cells: Phaser.GameObjects.Image[][] = [];
   private labels: Phaser.GameObjects.Text[] = [];
   private fichaDots: Phaser.GameObjects.Arc[] = [];
@@ -158,12 +172,18 @@ export class Game extends Scene {
   private exprLabel!: Phaser.GameObjects.Text;
   private waveG!: Phaser.GameObjects.Graphics;
   private waveZone!: Phaser.GameObjects.Zone;
+  private resetImg!: Phaser.GameObjects.Image;
+  private resetText!: Phaser.GameObjects.Text;
   private saveImg!: Phaser.GameObjects.Image;
   private saveText!: Phaser.GameObjects.Text;
+  private fsImg!: Phaser.GameObjects.Image;
+  private fsText!: Phaser.GameObjects.Text;
+  private ppImg!: Phaser.GameObjects.Image;
+  private ppText!: Phaser.GameObjects.Text;
+  private bgZone!: Phaser.GameObjects.Zone;
   private footer!: Phaser.GameObjects.Text;
   private toastText!: Phaser.GameObjects.Text;
 
-  // instrument dropdown
   private menuDim!: Phaser.GameObjects.Rectangle;
   private menuBackdrop!: Phaser.GameObjects.Zone;
   private menuPanel!: Phaser.GameObjects.Graphics;
@@ -175,6 +195,8 @@ export class Game extends Scene {
   private gridBox = { left: 0, top: 0, cellW: 10, rowH: 10 };
   private waveBox = { x: 0, y: 0, w: 10, h: 10 };
   private waveDrag: WaveDrag | null = null;
+  private resetTimer: Phaser.Time.TimerEvent | undefined = undefined;
+  private resetHeld = false;
 
   constructor() {
     super('Game');
@@ -184,7 +206,11 @@ export class Game extends Scene {
     this.ensureTextures();
     this.cameras.main.setBackgroundColor(KRAFT);
     this.bg = this.add.tileSprite(0, 0, this.scale.width, this.scale.height, 'cb_card').setOrigin(0);
+    // Full-surface catcher (behind everything): any tap on the post wakes it.
+    this.bgZone = this.add.zone(0, 0, 10, 10).setOrigin(0).setInteractive();
+    this.bgZone.on('pointerdown', () => this.gate());
     this.panel = this.add.graphics();
+    this.selRing = this.add.graphics();
 
     this.title = this.add.text(0, 0, 'RESONANCE', { fontFamily: CRAYON, fontSize: '30px', color: '#e2574c' }).setAngle(-2);
     this.dayChip = this.add.image(0, 0, 'cb_pill').setTint(0xfbe7c2).setOrigin(0, 0.5);
@@ -192,13 +218,16 @@ export class Game extends Scene {
     this.presenceChip = this.add.image(0, 0, 'cb_pill').setTint(0xe7f6ea).setOrigin(1, 0.5);
     this.presenceText = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '13px', color: '#2f8a4e' }).setOrigin(1, 0.5);
 
-    // BPM control (top-right): – 96 BPM +
     this.tempoDown = this.add.image(0, 0, 'cb_pill').setTint(0xffe08a).setInteractive({ useHandCursor: true });
-    this.tempoDown.on('pointerdown', () => this.stageTempo(-1));
+    this.tempoDown.on('pointerdown', () => {
+      if (this.gate()) this.stageTempo(-1);
+    });
     this.tempoDownT = this.add.text(0, 0, '–', { fontFamily: CRAYON, fontSize: '22px', color: '#7a5310' }).setOrigin(0.5);
     this.bpmText = this.add.text(0, 0, '96 BPM', { fontFamily: CRAYON, fontSize: '15px', color: '#6a5320' }).setOrigin(0.5);
     this.tempoUp = this.add.image(0, 0, 'cb_pill').setTint(0xffe08a).setInteractive({ useHandCursor: true });
-    this.tempoUp.on('pointerdown', () => this.stageTempo(+1));
+    this.tempoUp.on('pointerdown', () => {
+      if (this.gate()) this.stageTempo(+1);
+    });
     this.tempoUpT = this.add.text(0, 0, '+', { fontFamily: CRAYON, fontSize: '22px', color: '#7a5310' }).setOrigin(0.5);
 
     this.playhead = this.add.rectangle(0, 0, 10, 10, 0xfff3c9, 0.3);
@@ -207,7 +236,7 @@ export class Game extends Scene {
       const row: Phaser.GameObjects.Image[] = [];
       for (let s = 0; s < STEPS; s++) {
         const img = this.add.image(0, 0, 'cb_pad').setAngle(Phaser.Math.Between(-3, 3)).setInteractive({ useHandCursor: true });
-        img.on('pointerdown', () => this.toggleCell(t, s));
+        img.on('pointerdown', () => this.tapCell(t, s));
         row.push(img);
       }
       this.cells.push(row);
@@ -219,12 +248,10 @@ export class Game extends Scene {
       this.labels.push(label);
     }
 
-    // fichas (bottom-left)
     for (let i = 0; i < MAX_FICHAS; i++) this.fichaDots.push(this.add.circle(0, 0, 8, 0x3fb0ac).setStrokeStyle(2.5, INK));
     this.fichaText = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '14px', color: '#4a3a22' }).setOrigin(0, 0.5);
     this.fichaSub = this.add.text(0, 0, '↻ cada 12 h', { fontFamily: CRAYON, fontSize: '11px', color: '#a9691f' }).setOrigin(0, 0.5);
 
-    // expression wave
     this.exprLabel = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '12px', color: '#7a6a4a' });
     for (const tgt of FX_TARGETS) {
       const img = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
@@ -239,16 +266,63 @@ export class Game extends Scene {
     this.input.on('pointerup', () => {
       this.waveDrag = null;
     });
+    // Same-origin webviews coordinate over a BroadcastChannel so only ONE post plays:
+    // when another post claims audio, this one goes to sleep (pauses + needs re-waking).
+    try {
+      this.audioChan = new BroadcastChannel('resonance-audio');
+      this.audioChan.onmessage = (ev: MessageEvent) => {
+        const d = ev.data as { t?: string } | null;
+        if (d && d.t && d.t !== this.audioId) this.goSleep();
+      };
+    } catch {
+      this.audioChan = null;
+    }
+    window.addEventListener('blur', this.pauseHandler);
+    window.addEventListener('pagehide', this.pauseHandler);
+    document.addEventListener('freeze', this.pauseHandler);
+    document.addEventListener('visibilitychange', this.visHandler);
 
-    // save (bottom-right, small)
+    // RESET: tap = reset selected beat's wave; hold = clear the whole draft.
+    this.resetImg = this.add.image(0, 0, 'cb_pill').setTint(0xf1b0a0).setInteractive({ useHandCursor: true });
+    this.resetText = this.add.text(0, 0, '↺', { fontFamily: CRAYON, fontSize: '20px', color: '#7a3520' }).setOrigin(0.5);
+    this.resetImg.on('pointerdown', () => {
+      if (!this.gate()) return;
+      this.resetHeld = false;
+      this.resetTimer = this.time.delayedCall(550, () => {
+        this.resetHeld = true;
+        this.clearDraft();
+      });
+    });
+    this.resetImg.on('pointerup', () => {
+      if (!this.resetTimer) return;
+      this.resetTimer.remove();
+      this.resetTimer = undefined;
+      if (!this.resetHeld) this.resetSelectedWave();
+    });
+    this.resetImg.on('pointerout', () => {
+      this.resetTimer?.remove();
+      this.resetTimer = undefined;
+    });
+
     this.saveImg = this.add.image(0, 0, 'cb_pill').setTint(0x3fb0ac).setInteractive({ useHandCursor: true });
-    this.saveImg.on('pointerdown', () => void this.commit());
+    this.saveImg.on('pointerdown', () => {
+      if (this.gate()) void this.commit();
+    });
     this.saveText = this.add.text(0, 0, 'GUARDAR', { fontFamily: CRAYON, fontSize: '16px', color: '#fff9ec' }).setOrigin(0.5);
+    this.fsImg = this.add.image(0, 0, 'cb_pill').setTint(0xf2c14e).setInteractive({ useHandCursor: true });
+    this.fsImg.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (this.gate()) this.toggleFullscreen(p);
+    });
+    this.fsText = this.add.text(0, 0, '⛶', { fontFamily: CRAYON, fontSize: '20px', color: '#5a4410' }).setOrigin(0.5);
+    this.ppImg = this.add.image(0, 0, 'cb_pill').setTint(0x8fd6a0).setInteractive({ useHandCursor: true });
+    this.ppImg.on('pointerdown', () => {
+      if (this.gate()) this.togglePlayPause();
+    });
+    this.ppText = this.add.text(0, 0, '▶', { fontFamily: CRAYON, fontSize: '18px', color: '#1c3a24' }).setOrigin(0.5);
 
     this.footer = this.add.text(0, 0, 'nadie montó esto — lo hizo la comunidad ✏️', { fontFamily: CRAYON, fontSize: '11px', color: '#8a7a58' }).setOrigin(0.5);
     this.toastText = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '15px', color: '#ffd1d1' }).setOrigin(0.5).setAlpha(0);
 
-    // instrument dropdown (overlay)
     this.menuDim = this.add.rectangle(0, 0, 10, 10, 0x201a12, 0.5).setOrigin(0.5).setDepth(50);
     this.menuBackdrop = this.add.zone(0, 0, 10, 10).setOrigin(0.5).setDepth(50).setInteractive();
     this.menuBackdrop.on('pointerdown', () => {
@@ -294,6 +368,7 @@ export class Game extends Scene {
       const res = await fetch('/api/jam/init');
       if (!res.ok) throw new Error(`init ${res.status}`);
       const data = (await res.json()) as JamInitResponse;
+      this.myUserId = data.userId;
       this.applyServerState(data.state);
       this.energy = data.energy;
       this.channel = data.channel;
@@ -302,20 +377,87 @@ export class Game extends Scene {
     } catch {
       this.applyServerState(this.state);
     }
-    setKey(this.state.meta.key);
-    this.refreshEngine();
-    startTransport();
+    if (this.audioReady) {
+      setKey(this.state.meta.key);
+      this.refreshEngine();
+    }
     this.renderAll();
+  }
+
+  /** Unlock + start audio on the first user interaction (no start screen). */
+  private ensureAudio(): void {
+    if (this.audioReady) return;
+    this.audioReady = true;
+    void initAudio()
+      .then(() => {
+        setKey(this.state.meta.key);
+        this.refreshEngine();
+        this.claimAudio();
+      })
+      .catch((e) => console.error('audio init failed:', e));
+  }
+
+  /** Claim playback for this post and tell all other posts to pause. */
+  private claimAudio(): void {
+    try {
+      this.audioChan?.postMessage({ t: this.audioId });
+    } catch {
+      /* ignore */
+    }
+    if (this.audioReady) setPlaying(true);
+    this.renderPlayPause();
+  }
+
+  /** First touch on a sleeping post only WAKES it (returns false → swallow the action). */
+  private gate(): boolean {
+    if (this.active) return true;
+    this.activate();
+    return false;
+  }
+  private activate(): void {
+    this.active = true;
+    this.ensureAudio();
+    this.claimAudio();
+    this.renderAll();
+  }
+  private goSleep(): void {
+    this.active = false;
+    if (this.audioReady) setPlaying(false);
+    this.renderPlayPause();
+  }
+  private togglePlayPause(): void {
+    if (isPlaying()) setPlaying(false);
+    else this.claimAudio();
+    this.renderPlayPause();
+  }
+  private renderPlayPause(): void {
+    this.ppText.setText(isPlaying() ? '⏸' : '▶');
+  }
+
+  private webMode(): string {
+    try {
+      return getWebViewMode();
+    } catch {
+      return 'inline';
+    }
+  }
+  private toggleFullscreen(p: Phaser.Input.Pointer): void {
+    const ev = p.event as MouseEvent;
+    try {
+      if (this.webMode() === 'expanded') exitExpandedMode(ev);
+      else requestExpandedMode(ev, 'game');
+    } catch {
+      /* already in the requested mode */
+    }
   }
 
   private applyServerState(state: JamState): void {
     this.state = state;
     this.instruments = state.meta.instruments.slice(0, TRACKS);
     while (this.instruments.length < TRACKS) this.instruments.push('');
-    this.fx = state.meta.fx.slice(0, TRACKS);
-    while (this.fx.length < TRACKS) this.fx.push({ ...FLAT_FX });
     this.bpm = state.meta.bpm;
-    this.sharedActive = new Set(state.cells.map((c) => key(c.track, c.step)));
+    this.sharedCells.clear();
+    for (const c of state.cells) this.sharedCells.set(key(c.track, c.step), { by: c.by, fx: c.fx });
   }
 
   private subscribe(): void {
@@ -343,70 +485,87 @@ export class Game extends Scene {
   }
 
   private applyDiff(d: JamDiff): void {
-    if (d.kind === 'place') this.sharedActive.add(key(d.track, d.step));
-    else if (d.kind === 'remove') this.sharedActive.delete(key(d.track, d.step));
-    else if (d.kind === 'setInstrument') {
+    if (d.kind === 'place') this.sharedCells.set(key(d.track, d.step), { by: d.by, fx: d.fx });
+    else if (d.kind === 'remove') this.sharedCells.delete(key(d.track, d.step));
+    else if (d.kind === 'cellFx') {
+      const c = this.sharedCells.get(key(d.track, d.step));
+      if (c) this.sharedCells.set(key(d.track, d.step), { by: c.by, fx: d.fx });
+    } else if (d.kind === 'setInstrument') {
       if (d.track >= 0 && d.track < TRACKS) this.instruments[d.track] = d.instrument;
-    } else if (d.kind === 'fx') {
-      if (d.track >= 0 && d.track < TRACKS) this.fx[d.track] = d.fx;
     } else if (d.kind === 'tempo') this.bpm = d.bpm;
     else if (d.kind === 'presence') this.presence = d.count;
     this.refreshEngine();
     this.renderAll();
   }
 
-  // ---- editing ------------------------------------------------------------
+  // ---- cell/ownership helpers --------------------------------------------
   private effInstrument(t: number): string {
     return this.draftInstr.get(t) ?? this.instruments[t] ?? '';
   }
-  private effFx(t: number): TrackFx {
-    return this.draftFx.get(t) ?? this.fx[t] ?? { ...FLAT_FX };
+  private cellActive(k: string): boolean {
+    return this.draftPlace.has(k) || (this.sharedCells.has(k) && !this.draftRemove.has(k));
   }
-  private sharedFx(t: number): TrackFx {
-    return this.fx[t] ?? { ...FLAT_FX };
+  private cellOwner(k: string): string {
+    return this.draftPlace.has(k) ? this.myUserId : (this.sharedCells.get(k)?.by ?? '');
+  }
+  private ownsCell(k: string): boolean {
+    return this.myUserId !== '' && this.cellOwner(k) === this.myUserId;
+  }
+  private effCellFx(k: string): TrackFx {
+    return this.draftCellFx.get(k) ?? this.sharedCells.get(k)?.fx ?? { ...FLAT_FX };
   }
   private fxKey(fx: TrackFx): string {
     return fx.depth <= 0 ? 'off' : `${fx.type}:${Math.round(fx.depth * 100)}:${Math.round(fx.rate * 100)}`;
   }
-  private fxChanges(): number {
-    let n = 0;
-    for (const [t, fx] of this.draftFx) if (this.fxKey(fx) !== this.fxKey(this.sharedFx(t))) n++;
-    return n;
-  }
-  private tempoCost(): number {
-    return Math.ceil(Math.abs(this.draftTempo) / 2); // 1 ficha per 2 BPM
-  }
+
   private pendingCost(): number {
-    return this.draftPlace.size + this.draftRemove.size + this.draftInstr.size + this.fxChanges() + this.tempoCost();
-  }
-  private canStageMore(): boolean {
-    return this.pendingCost() < this.energy;
+    let cost = this.draftPlace.size + this.draftInstr.size + Math.ceil(Math.abs(this.draftTempo) / 2);
+    for (const k of this.draftRemove) cost += this.ownsCell(k) ? 0 : 1;
+    for (const [k, fx] of this.draftCellFx) {
+      if (this.draftPlace.has(k)) continue; // fx rides on the place action (free)
+      if (this.fxKey(fx) === this.fxKey(this.sharedCells.get(k)?.fx ?? { ...FLAT_FX })) continue;
+      cost += this.ownsCell(k) ? 0 : 1;
+    }
+    return cost;
   }
 
-  private toggleCell(t: number, s: number): void {
+  // ---- editing ------------------------------------------------------------
+  private tapCell(t: number, s: number): void {
+    if (!this.gate()) return;
     if (this.instrMenuOpen) return;
     const k = key(t, s);
-    if (this.draftPlace.has(k)) this.draftPlace.delete(k);
-    else if (this.draftRemove.has(k)) this.draftRemove.delete(k);
-    else if (this.sharedActive.has(k)) {
-      if (!this.canStageMore()) return this.flashNoFichas();
-      this.draftRemove.add(k);
-    } else {
+    if (this.draftRemove.has(k)) {
+      this.draftRemove.delete(k); // cancel a pending removal
+      this.selectedCell = k;
+    } else if (!this.cellActive(k)) {
       if (this.effInstrument(t) === '') {
         this.selectedTrack = t;
         this.showMenu(true);
         this.renderAll();
         return;
       }
-      if (!this.canStageMore()) return this.flashNoFichas();
+      if (this.pendingCost() + 1 > this.energy) return this.flashNoFichas();
       this.draftPlace.add(k);
+      this.selectedCell = k; // auto-select the new beat to shape its wave
+    } else if (this.selectedCell === k) {
+      // second tap on the selected beat → remove it
+      if (this.draftPlace.has(k)) {
+        this.draftPlace.delete(k);
+        this.draftCellFx.delete(k);
+        this.selectedCell = null;
+      } else {
+        if (this.pendingCost() + (this.ownsCell(k) ? 0 : 1) > this.energy) return this.flashNoFichas();
+        this.draftRemove.add(k);
+      }
+    } else {
+      this.selectedCell = k; // select it (to edit its wave)
     }
     this.refreshEngine();
     this.renderAll();
   }
 
-  /** 1st tap selects the track; tapping the already-selected track opens the instrument menu. */
   private onTrackLabel(t: number): void {
+    if (!this.gate()) return;
     if (this.selectedTrack === t) this.showMenu(!this.instrMenuOpen);
     else {
       this.selectedTrack = t;
@@ -419,7 +578,7 @@ export class Game extends Scene {
     const t = this.selectedTrack;
     if (t < 0) return;
     const alreadyStaged = this.draftInstr.has(t);
-    if (!alreadyStaged && id !== this.instruments[t] && !this.canStageMore()) {
+    if (!alreadyStaged && id !== this.instruments[t] && this.pendingCost() + 1 > this.energy) {
       this.flashNoFichas();
       return;
     }
@@ -431,58 +590,85 @@ export class Game extends Scene {
   }
 
   private pickFxTarget(type: FxType): void {
-    if (this.selectedTrack < 0) return this.toast('toca una pista primero 👆', '#ffe0a0');
-    const t = this.selectedTrack;
-    const cur = this.effFx(t);
-    this.draftFx.set(t, { type, depth: cur.depth, rate: cur.rate });
-    this.refreshEngine();
-    this.renderAll();
+    if (!this.gate()) return;
+    const k = this.selectedCell;
+    if (!k) return this.toast('toca un beat primero 👆', '#ffe0a0');
+    const cur = this.effCellFx(k);
+    this.setDraftFx(k, { type, depth: cur.depth, rate: cur.rate });
   }
 
   private startWaveDrag(p: Phaser.Input.Pointer): void {
+    if (!this.gate()) return;
     if (this.instrMenuOpen) return;
-    if (this.selectedTrack < 0) return this.toast('toca una pista primero 👆', '#ffe0a0');
-    const fx = this.effFx(this.selectedTrack);
-    this.waveDrag = { sx: p.x, sy: p.y, d0: fx.depth, r0: fx.rate, track: this.selectedTrack };
+    const k = this.selectedCell;
+    if (!k) return this.toast('toca un beat primero 👆', '#ffe0a0');
+    const fx = this.effCellFx(k);
+    this.waveDrag = { sx: p.x, sy: p.y, d0: fx.depth, r0: fx.rate, cell: k };
   }
   private onWaveMove(p: Phaser.Input.Pointer): void {
     const wd = this.waveDrag;
     if (!wd) return;
     const depth = Phaser.Math.Clamp(wd.d0 + (wd.sy - p.y) / (this.waveBox.h * 0.8), 0, 1);
     const rate = Phaser.Math.Clamp(wd.r0 + (p.x - wd.sx) / this.waveBox.w, 0, 1);
-    const cur = this.effFx(wd.track);
-    this.draftFx.set(wd.track, { type: cur.type === 'none' ? 'vibrato' : cur.type, depth, rate });
+    const cur = this.effCellFx(wd.cell);
+    this.setDraftFx(wd.cell, { type: cur.type === 'none' ? 'vibrato' : cur.type, depth, rate }, true);
+  }
+
+  /** Stage a wave change for a cell. Blocks if it would cost more than you have. */
+  private setDraftFx(k: string, fx: TrackFx, quiet = false): void {
+    if (!this.draftCellFx.has(k) && !this.draftPlace.has(k)) {
+      const changed = this.fxKey(fx) !== this.fxKey(this.sharedCells.get(k)?.fx ?? { ...FLAT_FX });
+      if (changed && !this.ownsCell(k) && this.pendingCost() + 1 > this.energy) {
+        if (!quiet) this.flashNoFichas();
+        return;
+      }
+    }
+    this.draftCellFx.set(k, fx);
     this.refreshEngine();
-    this.renderExpression();
-    this.renderFichas();
-    this.renderSave();
-    this.drawWave();
+    if (quiet) {
+      this.renderExpression();
+      this.renderFichas();
+      this.renderSave();
+      this.drawWave();
+    } else this.renderAll();
   }
 
   private stageTempo(delta: number): void {
     const next = Phaser.Math.Clamp(this.bpm + this.draftTempo + delta, this.state.meta.bpmMin, this.state.meta.bpmMax);
     const nd = next - this.bpm;
-    if (nd === this.draftTempo) return; // hit the range limit — nothing changed
-    const others = this.draftPlace.size + this.draftRemove.size + this.draftInstr.size + this.fxChanges();
+    if (nd === this.draftTempo) return;
+    const others = this.pendingCost() - Math.ceil(Math.abs(this.draftTempo) / 2);
     if (others + Math.ceil(Math.abs(nd) / 2) > this.energy) return this.flashNoFichas();
     this.draftTempo = nd;
     this.refreshEngine();
     this.renderAll();
   }
 
+  private resetSelectedWave(): void {
+    const k = this.selectedCell;
+    if (!k) return this.toast('toca un beat primero 👆', '#ffe0a0');
+    this.setDraftFx(k, { ...FLAT_FX });
+  }
+  private clearDraft(): void {
+    this.draftPlace.clear();
+    this.draftRemove.clear();
+    this.draftInstr.clear();
+    this.draftCellFx.clear();
+    this.draftTempo = 0;
+    this.refreshEngine();
+    this.renderAll();
+    this.toast('borrador vaciado 🧹', '#ffe0a0');
+  }
+
   private refreshEngine(): void {
-    const merged = new Set(this.sharedActive);
-    for (const k of this.draftRemove) merged.delete(k);
-    for (const k of this.draftPlace) merged.add(k);
-    setActive(merged);
+    if (!this.audioReady) return;
+    const merged = new Map<string, TrackFx>();
+    for (const [k, c] of this.sharedCells) if (!this.draftRemove.has(k)) merged.set(k, this.draftCellFx.get(k) ?? c.fx);
+    for (const k of this.draftPlace) merged.set(k, this.effCellFx(k));
+    setActiveCells(merged);
     const eff: string[] = [];
-    const effFx: TrackFx[] = [];
-    for (let t = 0; t < TRACKS; t++) {
-      eff.push(this.effInstrument(t));
-      effFx.push(this.effFx(t));
-    }
+    for (let t = 0; t < TRACKS; t++) eff.push(this.effInstrument(t));
     setInstruments(eff);
-    setFxs(effFx);
     setBpm(this.bpm + this.draftTempo);
   }
 
@@ -490,14 +676,19 @@ export class Game extends Scene {
     const actions: JamAction[] = [];
     for (const k of this.draftPlace) {
       const [t, s] = k.split('_').map(Number);
-      actions.push({ kind: 'place', track: t ?? 0, step: s ?? 0 });
+      actions.push({ kind: 'place', track: t ?? 0, step: s ?? 0, fx: this.effCellFx(k) });
     }
     for (const k of this.draftRemove) {
       const [t, s] = k.split('_').map(Number);
       actions.push({ kind: 'remove', track: t ?? 0, step: s ?? 0 });
     }
+    for (const [k, fx] of this.draftCellFx) {
+      if (this.draftPlace.has(k)) continue;
+      if (this.fxKey(fx) === this.fxKey(this.sharedCells.get(k)?.fx ?? { ...FLAT_FX })) continue;
+      const [t, s] = k.split('_').map(Number);
+      actions.push({ kind: 'setCellFx', track: t ?? 0, step: s ?? 0, fx });
+    }
     for (const [t, id] of this.draftInstr) actions.push({ kind: 'setInstrument', track: t, instrument: id });
-    for (const [t, fx] of this.draftFx) if (this.fxKey(fx) !== this.fxKey(this.sharedFx(t))) actions.push({ kind: 'setFx', track: t, fx });
     if (this.draftTempo !== 0) actions.push({ kind: 'nudgeTempo', delta: this.draftTempo });
     if (actions.length === 0) return;
     if (this.pendingCost() > this.energy) return this.flashNoFichas();
@@ -523,16 +714,19 @@ export class Game extends Scene {
 
   private foldDraftLocally(): void {
     const cost = this.pendingCost();
-    for (const k of this.draftPlace) this.sharedActive.add(k);
-    for (const k of this.draftRemove) this.sharedActive.delete(k);
+    for (const k of this.draftPlace) this.sharedCells.set(k, { by: this.myUserId, fx: this.effCellFx(k) });
+    for (const k of this.draftRemove) this.sharedCells.delete(k);
+    for (const [k, fx] of this.draftCellFx) {
+      const c = this.sharedCells.get(k);
+      if (c && !this.draftPlace.has(k)) this.sharedCells.set(k, { by: c.by, fx });
+    }
     for (const [t, id] of this.draftInstr) this.instruments[t] = id;
-    for (const [t, fx] of this.draftFx) this.fx[t] = fx;
     this.bpm += this.draftTempo;
     this.energy = Math.max(0, this.energy - cost);
     this.draftPlace.clear();
     this.draftRemove.clear();
     this.draftInstr.clear();
-    this.draftFx.clear();
+    this.draftCellFx.clear();
     this.draftTempo = 0;
   }
 
@@ -563,24 +757,27 @@ export class Game extends Scene {
     const rows = Math.ceil(this.menuChips.length / cols);
     const px = 22 * u;
     const pw = W - 44 * u;
-    const chH = 38 * u;
-    const ph = 58 * u + rows * (chH + 8 * u);
+    const chH = 36 * u;
+    const ph = 56 * u + rows * (chH + 8 * u);
     const py = (H - ph) / 2;
     this.menuPanel.clear();
     this.menuPanel.fillStyle(0xf1e3bf, 0.98).fillRoundedRect(px, py, pw, ph, 18 * u);
     this.menuPanel.lineStyle(3 * u, INK, 0.85).strokeRoundedRect(px, py, pw, ph, 18 * u);
     const sel = this.selectedTrack;
-    this.menuTitle.setText(sel >= 0 ? `elige un sonido para la pista ${sel + 1}` : 'elige un sonido').setPosition(W / 2, py + 24 * u).setFontSize(14 * u);
+    this.menuTitle.setText(sel >= 0 ? `sonido para la fila ${sel + 1}` : 'elige un sonido').setPosition(W / 2, py + 24 * u).setFontSize(14 * u);
     const cw = (pw - 24 * u) / cols;
+    const curId = sel >= 0 ? this.effInstrument(sel) : '';
     for (let i = 0; i < this.menuChips.length; i++) {
       const m = this.menuChips[i];
       if (!m) continue;
+      const inst = instrumentById(m.id);
+      m.img.setTint(m.id === curId ? 0xffe6a7 : lighten(inst?.color ?? 0x999999, 0.35));
       const col = i % cols;
       const rowi = Math.floor(i / cols);
       const cx = px + 12 * u + col * cw + cw / 2;
       const cy = py + 48 * u + rowi * (chH + 8 * u) + chH / 2;
       m.img.setPosition(cx, cy).setDisplaySize(cw - 8 * u, chH);
-      m.txt.setPosition(cx, cy).setFontSize(12 * u);
+      m.txt.setPosition(cx, cy).setFontSize(11.5 * u);
     }
   }
 
@@ -599,6 +796,9 @@ export class Game extends Scene {
     this.renderExpression();
     this.drawWave();
     this.renderSave();
+    this.renderFs();
+    this.renderPlayPause();
+    this.drawSelRing();
   }
 
   private renderSave(): void {
@@ -607,17 +807,18 @@ export class Game extends Scene {
     this.saveImg.setAlpha(cost > 0 ? 1 : 0.55);
   }
 
+  private renderFs(): void {
+    this.fsText.setText(this.webMode() === 'expanded' ? '⤡ salir' : '⛶');
+  }
+
   private renderCell(t: number, s: number): void {
     const img = this.cells[t]?.[s];
     if (!img) return;
     const k = key(t, s);
-    const shared = this.sharedActive.has(k);
-    const dP = this.draftPlace.has(k);
-    const dR = this.draftRemove.has(k);
     const color = this.trackColor(t);
-    if (dP) img.setTint(lighten(color, 0.4)).setAlpha(1);
-    else if (dR) img.setTint(color).setAlpha(0.35);
-    else if (shared) img.setTint(color).setAlpha(1);
+    if (this.draftPlace.has(k)) img.setTint(lighten(color, 0.4)).setAlpha(1);
+    else if (this.draftRemove.has(k)) img.setTint(color).setAlpha(0.3);
+    else if (this.sharedCells.has(k)) img.setTint(color).setAlpha(1);
     else img.setTint(color).setAlpha(0.16);
   }
 
@@ -650,10 +851,16 @@ export class Game extends Scene {
   }
 
   private renderExpression(): void {
-    const sel = this.selectedTrack;
-    const inst = sel >= 0 ? instrumentById(this.effInstrument(sel)) : undefined;
-    this.exprLabel.setText(sel < 0 ? '🎚️ EXPRESIÓN — toca una pista' : `🎚️ EXPRESIÓN · ${inst ? inst.label : 'pista ' + (sel + 1)}`);
-    const active = sel >= 0 ? this.effFx(sel) : null;
+    const k = this.selectedCell;
+    if (!k) {
+      this.exprLabel.setText('🎚️ ONDA — toca un beat');
+    } else {
+      const [t] = k.split('_').map(Number);
+      const inst = instrumentById(this.effInstrument(t ?? 0));
+      const free = this.ownsCell(k);
+      this.exprLabel.setText(`🎚️ ONDA · ${inst ? inst.label : 'beat'} ${free ? '(tuyo · gratis)' : '(ajeno · 1 ficha)'}`);
+    }
+    const active = k ? this.effCellFx(k) : null;
     for (const c of this.fxChips) c.img.setAlpha(active !== null && active.depth > 0 && c.type === active.type ? 1 : 0.5);
   }
 
@@ -670,9 +877,11 @@ export class Game extends Scene {
     g.moveTo(b.x + 8 * u, yc);
     g.lineTo(b.x + b.w - 8 * u, yc);
     g.strokePath();
-    if (this.selectedTrack < 0) return;
-    const fx = this.effFx(this.selectedTrack);
-    const color = instrumentById(this.effInstrument(this.selectedTrack))?.color ?? 0x3fb0ac;
+    const k = this.selectedCell;
+    if (!k) return;
+    const fx = this.effCellFx(k);
+    const [t] = k.split('_').map(Number);
+    const color = instrumentById(this.effInstrument(t ?? 0))?.color ?? 0x3fb0ac;
     const amp = (b.h / 2 - 6 * u) * 0.92 * fx.depth;
     const cycles = 0.5 + fx.rate * 5.5;
     const x0 = b.x + 8 * u;
@@ -687,6 +896,21 @@ export class Game extends Scene {
       else g.lineTo(x, y);
     }
     g.strokePath();
+  }
+
+  private drawSelRing(): void {
+    const g = this.selRing;
+    g.clear();
+    const k = this.selectedCell;
+    if (!k || !this.cellActive(k)) return;
+    const [t, s] = k.split('_').map(Number);
+    if (t === undefined || s === undefined) return;
+    const { left, top, cellW, rowH } = this.gridBox;
+    const cx = left + s * cellW + cellW / 2;
+    const cy = top + t * rowH + rowH / 2;
+    const w = cellW - 1 * this.u;
+    const h = rowH - 3 * this.u;
+    g.lineStyle(3 * this.u, 0xffffff, 0.95).strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, 6 * this.u);
   }
 
   private onStepVisual(step: number): void {
@@ -730,14 +954,23 @@ export class Game extends Scene {
     this.dayText.setPosition(16 * u, 60 * u).setFontSize(13 * u);
     this.sizePill(this.dayChip, this.dayText, 12 * u, 0, 0.5);
     this.dayChip.setPosition(14 * u, 60 * u);
-    this.presenceText.setPosition(W - 16 * u, 24 * u).setFontSize(13 * u);
+    const fsSz = 40 * u;
+    const fsCx = W - 8 * u - fsSz / 2;
+    this.fsImg.setPosition(fsCx, 24 * u).setDisplaySize(fsSz, 32 * u);
+    this.fsText.setPosition(fsCx, 24 * u).setFontSize(19 * u);
+    const ppCx = fsCx - fsSz - 6 * u;
+    this.ppImg.setPosition(ppCx, 24 * u).setDisplaySize(fsSz, 32 * u);
+    this.ppText.setPosition(ppCx, 24 * u).setFontSize(18 * u);
+    const presRight = ppCx - fsSz / 2 - 8 * u;
+    this.presenceText.setPosition(presRight, 24 * u).setFontSize(13 * u);
     this.sizePill(this.presenceChip, this.presenceText, 12 * u, 1, 0.5);
-    this.presenceChip.setPosition(W - 12 * u, 24 * u);
+    this.presenceChip.setPosition(presRight + 4 * u, 24 * u);
     this.layoutBpm();
+    this.bgZone.setPosition(0, 0).setSize(W, H);
 
     const labelW = Phaser.Math.Clamp(W * 0.22, 70 * u, 130 * u);
     const left = labelW + 6 * u;
-    const top = 96 * u;
+    const top = 92 * u;
     const gridH = H * 0.4;
     const cellW = (W - 10 * u - left) / STEPS;
     const rowH = gridH / TRACKS;
@@ -758,7 +991,7 @@ export class Game extends Scene {
     this.playhead.setSize(cellW, rowH * TRACKS);
     this.onStepVisual(this.curStep);
 
-    // expression
+    // expression (per-beat wave)
     const chipH = 28 * u;
     const exprTop = top + gridH + 30 * u;
     this.exprLabel.setPosition(14 * u, exprTop).setFontSize(12 * u);
@@ -771,8 +1004,14 @@ export class Game extends Scene {
       c.img.setPosition(cx, fxY).setDisplaySize(chipW, chipH);
       c.txt.setPosition(cx, fxY).setFontSize(12 * u);
     }
-    this.waveBox = { x: 14 * u, y: fxY + chipH / 2 + 8 * u, w: W - 28 * u, h: 52 * u };
+    // wave bar + reset button beside it
+    const rBtn = 40 * u;
+    this.waveBox = { x: 14 * u, y: fxY + chipH / 2 + 8 * u, w: W - 28 * u - rBtn - 8 * u, h: 52 * u };
     this.waveZone.setPosition(this.waveBox.x + this.waveBox.w / 2, this.waveBox.y + this.waveBox.h / 2).setSize(this.waveBox.w, this.waveBox.h);
+    const rx = this.waveBox.x + this.waveBox.w + 8 * u + rBtn / 2;
+    const ry = this.waveBox.y + this.waveBox.h / 2;
+    this.resetImg.setPosition(rx, ry).setDisplaySize(rBtn, this.waveBox.h);
+    this.resetText.setPosition(rx, ry).setFontSize(20 * u);
 
     // bottom: fichas (left) + GUARDAR (right)
     const by = H - 40 * u;
@@ -781,7 +1020,7 @@ export class Game extends Scene {
     this.fichaText.setPosition(16 * u + MAX_FICHAS * dotGap + 4 * u, by).setFontSize(14 * u);
     this.fichaSub.setPosition(this.fichaText.x + this.fichaText.width + 10 * u, by).setFontSize(11 * u);
 
-    const saveW = Math.min(190 * u, W * 0.44);
+    const saveW = Math.min(180 * u, W * 0.42);
     const saveCx = W - 12 * u - saveW / 2;
     this.saveImg.setPosition(saveCx, by).setDisplaySize(saveW, 42 * u);
     this.saveText.setPosition(saveCx, by).setFontSize(16 * u);
@@ -800,5 +1039,14 @@ export class Game extends Scene {
   private shutdown(): void {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.conn) void this.conn.disconnect();
+    window.removeEventListener('blur', this.pauseHandler);
+    window.removeEventListener('pagehide', this.pauseHandler);
+    document.removeEventListener('freeze', this.pauseHandler);
+    document.removeEventListener('visibilitychange', this.visHandler);
+    try {
+      this.audioChan?.close();
+    } catch {
+      /* ignore */
+    }
   }
 }

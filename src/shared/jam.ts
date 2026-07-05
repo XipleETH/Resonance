@@ -22,23 +22,40 @@ export type Instrument = {
   category: InstrumentCategory;
   synth: SynthKind;
   emoji: string;
+  recipe?: string; // special trigger recipe (pitch envelope) for animals/voice/fx
   note?: string; // base note for pitched instruments (client snaps to the day's scale)
   color: number; // crayon color for its pads
 };
 
 export const LIBRARY: readonly Instrument[] = [
+  // batería
   { id: 'kick', label: 'Bombo', category: 'drum', synth: 'membrane', emoji: '🥁', note: 'C1', color: 0xe2574c },
   { id: 'snare', label: 'Caja', category: 'drum', synth: 'noise', emoji: '👏', color: 0x4a7fd0 },
   { id: 'hat', label: 'Hi-hat', category: 'drum', synth: 'noise', emoji: '🎩', color: 0xf2b705 },
   { id: 'clap', label: 'Palmas', category: 'drum', synth: 'noise', emoji: '👐', color: 0xef8a3c },
   { id: 'tom', label: 'Tom', category: 'drum', synth: 'membrane', emoji: '🪘', note: 'G1', color: 0xd06bd0 },
+  // bajo
   { id: 'bass', label: 'Bajo', category: 'bass', synth: 'mono', emoji: '🎸', note: 'C2', color: 0x5bb974 },
   { id: 'sub', label: 'Sub 808', category: 'bass', synth: 'membrane', emoji: '🔊', note: 'C1', color: 0x2f8a4e },
+  // melodía
   { id: 'pluck', label: 'Pluck', category: 'melody', synth: 'pluck', emoji: '🪕', note: 'C4', color: 0x9b6bd0 },
   { id: 'lead', label: 'Lead', category: 'melody', synth: 'fm', emoji: '🎹', note: 'C4', color: 0x6f42ab },
+  { id: 'keys', label: 'Teclas', category: 'melody', synth: 'pluck', emoji: '🎶', note: 'C4', color: 0x7f6bd0 },
   { id: 'bell', label: 'Campana', category: 'melody', synth: 'metal', emoji: '🔔', note: 'C5', color: 0x3fb0ac },
+  // fx
   { id: 'zap', label: 'Zap', category: 'fx', synth: 'fm', emoji: '⚡', note: 'C6', color: 0xef476f },
   { id: 'riser', label: 'Riser', category: 'fx', synth: 'noise', emoji: '🌊', color: 0xffd166 },
+  { id: 'drop', label: 'Drop', category: 'fx', synth: 'mono', emoji: '💧', recipe: 'drop', note: 'C5', color: 0x3fb0ac },
+  // animales 🐾 (síntesis juguetona)
+  { id: 'bird', label: 'Pájaro', category: 'animal', synth: 'fm', emoji: '🐦', recipe: 'chirp', note: 'C6', color: 0x7fd0ff },
+  { id: 'cat', label: 'Gato', category: 'animal', synth: 'mono', emoji: '🐱', recipe: 'meow', note: 'E4', color: 0xef8a3c },
+  { id: 'dog', label: 'Perro', category: 'animal', synth: 'mono', emoji: '🐶', recipe: 'bark', note: 'C3', color: 0xd0a06b },
+  { id: 'frog', label: 'Rana', category: 'animal', synth: 'mono', emoji: '🐸', recipe: 'ribbit', note: 'C3', color: 0x6cba7d },
+  // voz 🎤 (beatbox)
+  { id: 'boom', label: 'Boom', category: 'voice', synth: 'membrane', emoji: '🗣️', note: 'C1', color: 0x9b6bd0 },
+  { id: 'tss', label: 'Tss', category: 'voice', synth: 'noise', emoji: '🤫', color: 0x4a7fd0 },
+  { id: 'pah', label: 'Pah', category: 'voice', synth: 'noise', emoji: '💥', color: 0xe2574c },
+  { id: 'uh', label: 'Uh', category: 'voice', synth: 'fm', emoji: '🎤', recipe: 'vox', note: 'A3', color: 0xe86ea8 },
 ];
 
 export type Category = {
@@ -109,10 +126,10 @@ export type JamMeta = {
   tracks: number;
   version: number;
   instruments: string[]; // per-track instrument id ('' = empty slot)
-  fx: TrackFx[]; // per-track expression wave
 };
 
-export type Cell = { track: number; step: number; by: string };
+// A placed beat. Each one carries its OWN expression wave (fx) + its placer (by).
+export type Cell = { track: number; step: number; by: string; fx: TrackFx };
 
 export type JamState = {
   meta: JamMeta;
@@ -123,17 +140,17 @@ export type JamState = {
 // Actions (each costs 1 ficha) and realtime diffs
 // ---------------------------------------------------------------------------
 export type JamAction =
-  | { kind: 'place'; track: number; step: number }
+  | { kind: 'place'; track: number; step: number; fx: TrackFx }
   | { kind: 'remove'; track: number; step: number }
   | { kind: 'setInstrument'; track: number; instrument: string }
-  | { kind: 'setFx'; track: number; fx: TrackFx }
+  | { kind: 'setCellFx'; track: number; step: number; fx: TrackFx } // change one beat's wave
   | { kind: 'nudgeTempo'; delta: number };
 
 export type JamDiff =
-  | { kind: 'place'; track: number; step: number; by: string; version: number }
+  | { kind: 'place'; track: number; step: number; by: string; fx: TrackFx; version: number }
   | { kind: 'remove'; track: number; step: number; version: number }
   | { kind: 'setInstrument'; track: number; instrument: string; version: number }
-  | { kind: 'fx'; track: number; fx: TrackFx; version: number }
+  | { kind: 'cellFx'; track: number; step: number; fx: TrackFx; version: number }
   | { kind: 'tempo'; bpm: number; version: number }
   | { kind: 'presence'; count: number };
 
@@ -144,6 +161,7 @@ export type JamInitResponse = {
   type: 'jamInit';
   postId: string;
   username: string;
+  userId: string;
   state: JamState;
   energy: number;
   channel: string;

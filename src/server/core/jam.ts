@@ -2,7 +2,6 @@ import { redis, realtime } from '@devvit/web/server';
 import {
   decodeFx,
   encodeFx,
-  FLAT_FX,
   LIBRARY,
   MAX_FICHAS,
   REFILL_MS,
@@ -33,6 +32,15 @@ const intOr = (v: string | undefined, d: number): number => {
 
 const currentPeriod = (now: number): number => Math.floor(now / REFILL_MS);
 const todayStr = (now: number): string => new Date(now).toISOString().slice(0, 10);
+
+// A grid cell's value encodes its placer + its wave: "by" (flat) or "by;type:depth:rate".
+const cellVal = (by: string, fx: TrackFx): string => (fx.depth > 0 ? `${by};${encodeFx(fx)}` : by);
+const parseCell = (value: string): { by: string; fx: TrackFx } => {
+  const i = value.indexOf(';');
+  return i < 0
+    ? { by: value, fx: decodeFx(undefined) }
+    : { by: value.slice(0, i), fx: decodeFx(value.slice(i + 1)) };
+};
 
 // tiny deterministic RNG so every client agrees on the day's base
 const hashStr = (s: string): number => {
@@ -69,10 +77,7 @@ async function seedJam(postId: string, now: number): Promise<void> {
     tracks: String(TRACKS),
     version: '1',
   };
-  for (let t = 0; t < TRACKS; t++) {
-    metaFields['inst' + t] = seededIds[t] ?? '';
-    metaFields['fx' + t] = encodeFx(FLAT_FX);
-  }
+  for (let t = 0; t < TRACKS; t++) metaFields['inst' + t] = seededIds[t] ?? '';
   // Start CLEAN: 3 instruments + a tempo, but NO notes — the community builds from zero.
   await redis.hSet(metaKey(postId), metaFields);
 }
@@ -87,11 +92,7 @@ export async function getState(postId: string): Promise<JamState> {
 
   const tracks = intOr(metaRaw['tracks'], TRACKS);
   const instruments: string[] = [];
-  const fx: TrackFx[] = [];
-  for (let t = 0; t < tracks; t++) {
-    instruments.push(metaRaw['inst' + t] ?? '');
-    fx.push(decodeFx(metaRaw['fx' + t]));
-  }
+  for (let t = 0; t < tracks; t++) instruments.push(metaRaw['inst' + t] ?? '');
 
   const meta: JamMeta = {
     day: metaRaw['day'] ?? todayStr(now),
@@ -105,16 +106,18 @@ export async function getState(postId: string): Promise<JamState> {
     tracks,
     version: intOr(metaRaw['version'], 1),
     instruments,
-    fx,
   };
 
   const gridRaw = await redis.hGetAll(gridKey(postId));
   const cells: Cell[] = [];
-  for (const [field, by] of Object.entries(gridRaw ?? {})) {
+  for (const [field, value] of Object.entries(gridRaw ?? {})) {
     const parts = field.split('_');
     const track = intOr(parts[0], -1);
     const step = intOr(parts[1], -1);
-    if (track >= 0 && step >= 0) cells.push({ track, step, by });
+    if (track >= 0 && step >= 0) {
+      const { by, fx } = parseCell(value);
+      cells.push({ track, step, by, fx });
+    }
   }
 
   return { meta, cells };
@@ -141,17 +144,32 @@ export async function commit(
   const state = await getState(postId);
   const fichas = await getEnergy(postId, userId);
 
-  // Tempo costs 1 ficha per 2 BPM of change; everything else is 1 ficha each.
-  const cost = actions.reduce(
-    (sum, a) => sum + (a.kind === 'nudgeTempo' ? Math.max(1, Math.ceil(Math.abs(a.delta) / 2)) : 1),
-    0
-  );
+  // Who placed each existing beat (for ownership-based cost).
+  const ownerOf = new Map<string, string>();
+  for (const c of state.cells) ownerOf.set(`${c.track}_${c.step}`, c.by);
+  const mine = (k: string): boolean => ownerOf.get(k) === userId;
+
+  // place a beat = 1; edit/remove YOUR OWN beat = 0, someone else's = 1;
+  // change instrument = 1; tempo = 1 per 2 BPM.
+  const actionCost = (a: JamAction): number => {
+    switch (a.kind) {
+      case 'remove':
+      case 'setCellFx':
+        return mine(`${a.track}_${a.step}`) ? 0 : 1;
+      case 'nudgeTempo':
+        return Math.max(1, Math.ceil(Math.abs(a.delta) / 2));
+      default:
+        return 1; // place, setInstrument
+    }
+  };
+  const cost = actions.reduce((sum, a) => sum + actionCost(a), 0);
   if (actions.length === 0) return { ok: true, energy: fichas, version: state.meta.version };
   if (cost > fichas) {
     return { ok: false, energy: fichas, version: state.meta.version, message: 'Sin fichas suficientes' };
   }
 
   const channel = channelFor(postId);
+  const gk = gridKey(postId);
   let version = state.meta.version;
   let bpm = state.meta.bpm;
 
@@ -160,21 +178,22 @@ export async function commit(
 
     if (a.kind === 'place') {
       if (!validCell(a.track, a.step, state.meta)) continue;
-      await redis.hSet(gridKey(postId), { [`${a.track}_${a.step}`]: userId });
-      await realtime.send<JamDiff>(channel, { kind: 'place', track: a.track, step: a.step, by: userId, version });
+      await redis.hSet(gk, { [`${a.track}_${a.step}`]: cellVal(userId, a.fx) });
+      await realtime.send<JamDiff>(channel, { kind: 'place', track: a.track, step: a.step, by: userId, fx: a.fx, version });
     } else if (a.kind === 'remove') {
       if (!validCell(a.track, a.step, state.meta)) continue;
-      await redis.hDel(gridKey(postId), [`${a.track}_${a.step}`]);
+      await redis.hDel(gk, [`${a.track}_${a.step}`]);
       await realtime.send<JamDiff>(channel, { kind: 'remove', track: a.track, step: a.step, version });
+    } else if (a.kind === 'setCellFx') {
+      const k = `${a.track}_${a.step}`;
+      if (!validCell(a.track, a.step, state.meta) || !ownerOf.has(k)) continue;
+      await redis.hSet(gk, { [k]: cellVal(ownerOf.get(k) ?? userId, a.fx) });
+      await realtime.send<JamDiff>(channel, { kind: 'cellFx', track: a.track, step: a.step, fx: a.fx, version });
     } else if (a.kind === 'setInstrument') {
       if (a.track < 0 || a.track >= state.meta.tracks) continue;
-      if (!LIBRARY.some((i) => i.id === a.instrument)) continue;
+      if (a.instrument !== '' && !LIBRARY.some((i) => i.id === a.instrument)) continue;
       await redis.hSet(metaKey(postId), { ['inst' + a.track]: a.instrument });
       await realtime.send<JamDiff>(channel, { kind: 'setInstrument', track: a.track, instrument: a.instrument, version });
-    } else if (a.kind === 'setFx') {
-      if (a.track < 0 || a.track >= state.meta.tracks) continue;
-      await redis.hSet(metaKey(postId), { ['fx' + a.track]: encodeFx(a.fx) });
-      await realtime.send<JamDiff>(channel, { kind: 'fx', track: a.track, fx: a.fx, version });
     } else {
       // nudgeTempo — bounded to the day's range
       bpm = Math.max(state.meta.bpmMin, Math.min(state.meta.bpmMax, bpm + a.delta));

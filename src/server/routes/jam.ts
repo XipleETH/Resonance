@@ -18,6 +18,7 @@ jam.get('/init', async (c) => {
     type: 'jamInit',
     postId,
     username: username ?? 'anonymous',
+    userId: userId ?? '',
     state,
     energy,
     channel: channelFor(postId),
