@@ -37,9 +37,40 @@ import {
 } from '../../shared/jam';
 
 const KRAFT = '#cdb083';
-const PANEL_FILL = 0xe7d6ac;
 const INK = 0x3a2f22;
 const CRAYON = '"Gochi Hand", "Comic Sans MS", "Marker Felt", "Segoe Print", cursive';
+
+// Per-day palette so every composition looks different — but only the "paper" surfaces
+// (background, panel, wave slider, slider buttons) shift; note pads + main buttons keep
+// their fixed colors so the app stays recognizable. Soft/high-lightness so it reads crayon.
+type Theme = { bg: string; card: number; panel: number; waveFill: number; accent: number };
+function hslNum(h: number, s: number, l: number): number {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; } else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; } else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+  const to = (v: number): number => Math.max(0, Math.min(255, Math.round((v + m) * 255)));
+  return (to(r) << 16) | (to(g) << 8) | to(b);
+}
+function themeFor(day: string): Theme {
+  let h = 2166136261;
+  for (let i = 0; i < day.length; i++) {
+    h ^= day.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const hue = (h >>> 0) % 360;
+  const hue2 = (hue + 150) % 360;
+  const hex = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
+  return {
+    bg: hex(hslNum(hue, 0.3, 0.5)),
+    card: hslNum(hue, 0.45, 0.82),
+    panel: hslNum(hue, 0.36, 0.84),
+    waveFill: hslNum(hue2, 0.4, 0.82),
+    accent: hslNum(hue2, 0.55, 0.68),
+  };
+}
 const key = (t: number, s: number): string => `${t}_${s}`;
 const keyText: Record<string, string> = { C: 'DO', D: 'RE', E: 'MI', F: 'FA', G: 'SOL', A: 'LA', B: 'SI' };
 
@@ -163,6 +194,7 @@ export class Game extends Scene {
   };
 
   private bg!: Phaser.GameObjects.TileSprite;
+  private theme: Theme = themeFor('DÍA 1');
   private panel!: Phaser.GameObjects.Graphics;
   private selRing!: Phaser.GameObjects.Graphics;
   private cells: Phaser.GameObjects.Image[][] = [];
@@ -670,6 +702,16 @@ export class Game extends Scene {
     this.sharedCells.clear();
     for (const c of state.cells) this.sharedCells.set(key(c.track, c.step), { by: c.by, fx: c.fx });
     this.assignPool();
+    this.applyTheme();
+  }
+
+  /** Recolor the paper surfaces for this day (bg, panel, wave slider, slider button). */
+  private applyTheme(): void {
+    this.theme = themeFor(this.state.meta.day);
+    this.cameras.main.setBackgroundColor(this.theme.bg);
+    this.bg.setTint(this.theme.card);
+    this.resetImg.setTint(this.theme.accent);
+    this.layout(); // redraw panel + wave with the new palette
   }
 
   /** Fill the 24 menu slots from the day's pool of pickable sounds. */
@@ -1145,7 +1187,7 @@ export class Game extends Scene {
     const b = this.waveBox;
     const u = this.u;
     g.clear();
-    g.fillStyle(PANEL_FILL, 0.5).fillRoundedRect(b.x, b.y, b.w, b.h, 10 * u);
+    g.fillStyle(this.theme.waveFill, 0.6).fillRoundedRect(b.x, b.y, b.w, b.h, 10 * u);
     g.lineStyle(2 * u, INK, 0.5).strokeRoundedRect(b.x, b.y, b.w, b.h, 10 * u);
     const yc = b.y + b.h / 2;
     g.lineStyle(1.5 * u, INK, 0.25);
@@ -1253,7 +1295,7 @@ export class Game extends Scene {
     this.gridBox = { left, top, cellW, rowH };
 
     this.panel.clear();
-    this.panel.fillStyle(PANEL_FILL, 0.5).fillRoundedRect(8 * u, top - 12 * u, W - 16 * u, gridH + 24 * u, 16 * u);
+    this.panel.fillStyle(this.theme.panel, 0.55).fillRoundedRect(8 * u, top - 12 * u, W - 16 * u, gridH + 24 * u, 16 * u);
     this.panel.lineStyle(3 * u, INK, 0.7).strokeRoundedRect(8 * u, top - 12 * u, W - 16 * u, gridH + 24 * u, 16 * u);
 
     for (let t = 0; t < TRACKS; t++) {

@@ -65,6 +65,9 @@ async function seedJam(postId: string, now: number): Promise<void> {
   const day = todayStr(now);
   const rnd = mulberry32(hashStr(day + postId));
   const bpm = 88 + Math.floor(rnd() * 5) * 4; // 88..104 in steps of 4
+  // A fresh base note (root of the pentatonic) each day — the whole jam transposes to it.
+  const KEYS = ['C', 'D', 'E', 'F', 'G', 'A'];
+  const key = KEYS[Math.floor(mulberry32(hashStr(day))() * KEYS.length)] ?? 'C';
 
   // The day's pickable palette (a random 24 of the whole library, same for everyone).
   const pool = pickDailyPool(day);
@@ -73,7 +76,7 @@ async function seedJam(postId: string, now: number): Promise<void> {
   const seededIds = [inCat('drum') ?? pool[0], inCat('bass') ?? pool[1], inCat('melody') ?? pool[2]];
   const metaFields: Record<string, string> = {
     day,
-    key: 'C',
+    key,
     scale: 'minor-pentatonic',
     bpm: String(bpm),
     bpmMin: String(bpm - 20),
