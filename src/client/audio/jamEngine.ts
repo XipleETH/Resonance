@@ -24,7 +24,9 @@ type AnySynth =
   | Tone.MetalSynth
   | Tone.MonoSynth
   | Tone.Synth
-  | Tone.FMSynth;
+  | Tone.FMSynth
+  | Tone.AMSynth
+  | Tone.DuoSynth;
 
 type Voice = { synth: AnySynth; inst: Instrument };
 
@@ -32,16 +34,24 @@ const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 
 const MINOR_PENT = [0, 3, 5, 7, 10]; // semitone offsets from the root
 
 function baseOctaveFor(inst: Instrument): number {
+  if (inst.octave !== undefined) return inst.octave;
   switch (inst.category) {
     case 'bass':
       return 2;
     case 'melody':
+    case 'pad':
       return 4;
     case 'fx':
       return 5;
     default:
       return 3;
   }
+}
+
+/** Whether a sound rides the day's scale (pitched) vs. plays a fixed note / noise. */
+function isPitched(inst: Instrument): boolean {
+  if (inst.pitched !== undefined) return inst.pitched;
+  return inst.category === 'bass' || inst.category === 'melody' || inst.category === 'fx' || inst.category === 'pad';
 }
 
 /** Note for a pitched instrument at a given step (spreads a pentatonic phrase across the bar). */
@@ -99,45 +109,57 @@ export function onStep(cb: (step: number) => void): void {
   stepCb = cb;
 }
 
+const envOf = (inst: Instrument, d: [number, number, number, number]): { attack: number; decay: number; sustain: number; release: number } => {
+  const e = inst.env ?? d;
+  return { attack: e[0], decay: e[1], sustain: e[2], release: e[3] };
+};
+
 function buildSynth(inst: Instrument): AnySynth {
+  const v = inst.vol;
   switch (inst.synth) {
     case 'membrane': {
       const deep = inst.id === 'sub' || inst.id === 'boom';
       return new Tone.MembraneSynth({
-        volume: deep ? -3 : -4,
+        volume: v ?? (deep ? -3 : -4),
         pitchDecay: deep ? 0.08 : 0.03,
         octaves: deep ? 8 : 5,
-        envelope: { attack: 0.001, decay: deep ? 0.5 : 0.32, sustain: 0, release: 0.2 },
+        envelope: envOf(inst, [0.001, deep ? 0.5 : 0.32, 0, 0.2]),
       });
     }
     case 'noise': {
       const short = inst.id === 'hat' || inst.id === 'tss';
       const long = inst.id === 'riser';
-      const decay = short ? 0.03 : long ? 0.5 : 0.14;
-      const type: 'white' | 'pink' = inst.id === 'snare' || inst.id === 'pah' ? 'pink' : 'white';
+      const decay = inst.env ? inst.env[1] : short ? 0.03 : long ? 0.5 : 0.14;
+      const type = inst.noise ?? (inst.id === 'snare' || inst.id === 'pah' ? 'pink' : 'white');
       return new Tone.NoiseSynth({
-        volume: short ? -20 : -13,
+        volume: v ?? (short ? -20 : -13),
         noise: { type },
-        envelope: { attack: 0.001, decay, sustain: 0 },
+        envelope: { attack: inst.env?.[0] ?? 0.001, decay, sustain: 0 },
       });
     }
     case 'metal':
-      return new Tone.MetalSynth({ volume: -22 });
+      return new Tone.MetalSynth({ volume: v ?? -22 });
     case 'mono':
       return new Tone.MonoSynth({
-        volume: -11,
-        oscillator: { type: inst.recipe === 'meow' || inst.recipe === 'bark' ? 'sawtooth' : 'square' },
-        filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 0.2, baseFrequency: 400, octaves: 3 },
-        envelope: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 0.15 },
+        volume: v ?? -11,
+        portamento: inst.glide ?? 0,
+        oscillator: { type: inst.osc ?? (inst.recipe === 'meow' || inst.recipe === 'bark' ? 'sawtooth' : 'square') },
+        filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 0.2, baseFrequency: inst.filterHz ?? 400, octaves: 3 },
+        envelope: envOf(inst, [0.01, 0.2, 0.3, 0.15]),
       });
     case 'fm':
-      return new Tone.FMSynth({ volume: -15 });
+      return new Tone.FMSynth({ volume: v ?? -15, portamento: inst.glide ?? 0, envelope: envOf(inst, [0.01, 0.2, 0.2, 0.2]) });
+    case 'am':
+      return new Tone.AMSynth({ volume: v ?? -14, portamento: inst.glide ?? 0, oscillator: { type: inst.osc ?? 'sine' }, envelope: envOf(inst, [0.01, 0.2, 0.3, 0.2]) });
+    case 'duo':
+      return new Tone.DuoSynth({ volume: v ?? -17, vibratoAmount: 0.15 });
+    case 'synth':
     case 'pluck':
     default:
       return new Tone.Synth({
-        volume: -14,
-        oscillator: { type: 'triangle' },
-        envelope: { attack: 0.005, decay: 0.2, sustain: 0.1, release: 0.2 },
+        volume: v ?? -14,
+        oscillator: { type: inst.osc ?? 'triangle' },
+        envelope: envOf(inst, [0.005, 0.2, 0.1, 0.2]),
       });
   }
 }
@@ -163,7 +185,7 @@ function routeTrack(track: number): void {
   v.synth.connect(g);
 }
 
-type PitchedSynth = Tone.MembraneSynth | Tone.MetalSynth | Tone.MonoSynth | Tone.Synth | Tone.FMSynth;
+type PitchedSynth = Tone.MembraneSynth | Tone.MetalSynth | Tone.MonoSynth | Tone.Synth | Tone.FMSynth | Tone.AMSynth | Tone.DuoSynth;
 
 const hz = (n: string): number => Tone.Frequency(n).toFrequency();
 
@@ -191,7 +213,7 @@ function triggerBase(
     applyRecipe(inst.recipe, inst, synth, step, time);
     return { pitched: false, baseHz: 0 };
   }
-  const pitched = inst.category === 'bass' || inst.category === 'melody' || inst.category === 'fx';
+  const pitched = isPitched(inst);
   const note = pitched ? scaleNote(rootPc, inst, step) : (inst.note ?? 'C2');
   synth.frequency.cancelScheduledValues(time);
   synth.triggerAttackRelease(note, dur ?? '16n', time);
@@ -230,6 +252,91 @@ function applyRecipe(r: string, inst: Instrument, synth: PitchedSynth, step: num
       break;
     case 'vox': // voice — follows the scale
       synth.triggerAttackRelease(scaleNote(rootPc, inst, step), '8n', time);
+      break;
+    case 'owl': // soft descending hoot
+      synth.triggerAttackRelease(hz('D4'), 0.35, time);
+      f.setValueAtTime(hz('D4'), time);
+      f.linearRampToValueAtTime(hz('B3'), time + 0.16);
+      break;
+    case 'duck': // quack down-blip
+      synth.triggerAttackRelease(hz('B3'), 0.14, time);
+      f.setValueAtTime(hz('B3'), time);
+      f.exponentialRampToValueAtTime(hz('F3'), time + 0.12);
+      break;
+    case 'cricket': // quick high chirp
+      synth.triggerAttackRelease(hz('B6'), 0.07, time);
+      break;
+    case 'moo': // low falling
+      synth.triggerAttackRelease(hz('C3'), 0.42, time);
+      f.setValueAtTime(hz('E3'), time);
+      f.linearRampToValueAtTime(hz('C3'), time + 0.38);
+      break;
+    case 'baa': // bleaty wobble
+      synth.triggerAttackRelease(hz('E4'), 0.3, time);
+      f.setValueAtTime(hz('E4'), time);
+      f.linearRampToValueAtTime(hz('D4'), time + 0.06);
+      f.linearRampToValueAtTime(hz('E4'), time + 0.12);
+      f.linearRampToValueAtTime(hz('D4'), time + 0.18);
+      break;
+    case 'buzz': // sustained insect buzz
+      synth.triggerAttackRelease(hz('A2'), 0.3, time);
+      f.setValueAtTime(hz('A2'), time);
+      f.linearRampToValueAtTime(hz('B2'), time + 0.15);
+      f.linearRampToValueAtTime(hz('A2'), time + 0.3);
+      break;
+    case 'howl': // rise then fall
+      synth.triggerAttackRelease(hz('A3'), 0.6, time);
+      f.setValueAtTime(hz('A3'), time);
+      f.exponentialRampToValueAtTime(hz('E4'), time + 0.3);
+      f.linearRampToValueAtTime(hz('C4'), time + 0.58);
+      break;
+    case 'crow': // squawk up-down
+      synth.triggerAttackRelease(hz('C4'), 0.25, time);
+      f.setValueAtTime(hz('C4'), time);
+      f.linearRampToValueAtTime(hz('G4'), time + 0.1);
+      f.linearRampToValueAtTime(hz('D4'), time + 0.22);
+      break;
+    case 'bubble': // quick up
+      synth.triggerAttackRelease(hz('C5'), 0.1, time);
+      f.setValueAtTime(hz('C5'), time);
+      f.exponentialRampToValueAtTime(hz('C6'), time + 0.08);
+      break;
+    case 'drip': // short down plink
+      synth.triggerAttackRelease(hz('C6'), 0.12, time);
+      f.setValueAtTime(hz('C6'), time);
+      f.exponentialRampToValueAtTime(hz('G5'), time + 0.1);
+      break;
+    case 'laser': // fast down zap
+      synth.triggerAttackRelease(hz('C7'), 0.18, time);
+      f.setValueAtTime(hz('C7'), time);
+      f.exponentialRampToValueAtTime(hz('C4'), time + 0.16);
+      break;
+    case 'coin': // up blip (arcade coin)
+      synth.triggerAttackRelease(hz('E5'), 0.12, time);
+      f.setValueAtTime(hz('E5'), time);
+      f.exponentialRampToValueAtTime(hz('B5'), time + 0.06);
+      break;
+    case 'powerup': // rising sweep
+      synth.triggerAttackRelease(hz('C4'), 0.3, time);
+      f.setValueAtTime(hz('C4'), time);
+      f.exponentialRampToValueAtTime(hz('C6'), time + 0.28);
+      break;
+    case 'siren': // up and down
+      synth.triggerAttackRelease(hz('A4'), 0.4, time);
+      f.setValueAtTime(hz('A4'), time);
+      f.linearRampToValueAtTime(hz('E5'), time + 0.2);
+      f.linearRampToValueAtTime(hz('A4'), time + 0.38);
+      break;
+    case 'warp': // down then up
+      synth.triggerAttackRelease(hz('C5'), 0.3, time);
+      f.setValueAtTime(hz('C5'), time);
+      f.exponentialRampToValueAtTime(hz('C3'), time + 0.14);
+      f.exponentialRampToValueAtTime(hz('C5'), time + 0.28);
+      break;
+    case 'whistle': // slide up whistle
+      synth.triggerAttackRelease(hz('C6'), 0.35, time);
+      f.setValueAtTime(hz('G5'), time);
+      f.exponentialRampToValueAtTime(hz('C6'), time + 0.15);
       break;
     default:
       synth.triggerAttackRelease(inst.note ?? 'C4', '16n', time);

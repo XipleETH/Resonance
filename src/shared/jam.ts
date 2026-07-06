@@ -13,19 +13,53 @@ export const REFILL_MS = 12 * 60 * 60 * 1000; // energy refills to MAX every 12h
 // MVP = synthesized (zero assets). Animals/voice/foley samples come after the
 // on-device audio spike tells us the bundle budget.
 // ---------------------------------------------------------------------------
-export type InstrumentCategory = 'drum' | 'bass' | 'melody' | 'fx' | 'animal' | 'voice';
-export type SynthKind = 'membrane' | 'noise' | 'metal' | 'mono' | 'fm' | 'pluck';
+export type InstrumentCategory = 'drum' | 'perc' | 'bass' | 'melody' | 'pad' | 'fx' | 'animal' | 'voice';
+export type SynthKind = 'membrane' | 'noise' | 'metal' | 'mono' | 'fm' | 'am' | 'duo' | 'pluck' | 'synth';
+export type OscType = 'sine' | 'triangle' | 'square' | 'sawtooth';
 
 export type Instrument = {
   id: string;
   label: string;
   category: InstrumentCategory;
   synth: SynthKind;
-  emoji: string;
+  emoji?: string; // legacy; UI now uses a drawn icon (ic_<id>) instead
   recipe?: string; // special trigger recipe (pitch envelope) for animals/voice/fx
   note?: string; // base note for pitched instruments (client snaps to the day's scale)
   color: number; // crayon color for its pads
+  // Optional per-sound voicing (data-driven so 98 sounds are just data, not code):
+  osc?: OscType; // oscillator waveform
+  vol?: number; // dB trim
+  env?: [number, number, number, number]; // [attack, decay, sustain, release]
+  filterHz?: number; // lowpass cutoff base
+  filterQ?: number; // resonance
+  noise?: 'white' | 'pink' | 'brown'; // for noise synth
+  glide?: number; // portamento seconds (mono/duo/fm)
+  octave?: number; // base octave override for pitched sounds
+  pitched?: boolean; // force pitched/unpitched (else derived from category)
 };
+
+/** How many of the whole library are offered in the picker each day (3 cols x 8 rows). */
+export const DAILY_POOL_SIZE = 24;
+
+/** Deterministic per-day subset of the library (same for everyone that day). */
+export function pickDailyPool(day: string, size: number = DAILY_POOL_SIZE): string[] {
+  let h = 2166136261;
+  for (let i = 0; i < day.length; i++) {
+    h ^= day.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const rng = (): number => {
+    h = Math.imul(h ^ (h >>> 15), h | 1);
+    h ^= h + Math.imul(h ^ (h >>> 7), h | 61);
+    return ((h ^ (h >>> 14)) >>> 0) / 4294967296;
+  };
+  const ids = LIBRARY.map((i) => i.id);
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [ids[i], ids[j]] = [ids[j] as string, ids[i] as string];
+  }
+  return ids.slice(0, Math.min(size, ids.length));
+}
 
 export const LIBRARY: readonly Instrument[] = [
   // batería
@@ -56,6 +90,95 @@ export const LIBRARY: readonly Instrument[] = [
   { id: 'tss', label: 'Tss', category: 'voice', synth: 'noise', emoji: '🤫', color: 0x4a7fd0 },
   { id: 'pah', label: 'Pah', category: 'voice', synth: 'noise', emoji: '💥', color: 0xe2574c },
   { id: 'uh', label: 'Uh', category: 'voice', synth: 'fm', emoji: '🎤', recipe: 'vox', note: 'A3', color: 0xe86ea8 },
+
+  // ===== batch 1: percussion, bass, mallets & synths =====
+  // percusión
+  { id: 'rim', label: 'Aro', category: 'perc', synth: 'synth', osc: 'square', note: 'E5', pitched: false, env: [0.001, 0.05, 0, 0.05], vol: -16, color: 0xd0a06b },
+  { id: 'cowbell', label: 'Cencerro', category: 'perc', synth: 'metal', pitched: false, vol: -24, color: 0xf2b705 },
+  { id: 'conga', label: 'Conga', category: 'perc', synth: 'membrane', note: 'A2', pitched: false, env: [0.001, 0.22, 0, 0.15], color: 0xd0794a },
+  { id: 'bongo', label: 'Bongó', category: 'perc', synth: 'membrane', note: 'E3', pitched: false, env: [0.001, 0.16, 0, 0.12], color: 0xc06a3a },
+  { id: 'woodblock', label: 'Madera', category: 'perc', synth: 'synth', osc: 'square', note: 'C5', pitched: false, env: [0.001, 0.06, 0, 0.05], vol: -13, color: 0xc8935a },
+  { id: 'shaker', label: 'Maraca', category: 'perc', synth: 'noise', noise: 'white', env: [0.001, 0.05, 0, 0.02], vol: -20, color: 0x8fd6a0 },
+  { id: 'tamb', label: 'Pandereta', category: 'perc', synth: 'noise', noise: 'white', env: [0.001, 0.09, 0, 0.03], vol: -18, color: 0xf2b705 },
+  { id: 'clave', label: 'Clave', category: 'perc', synth: 'synth', osc: 'square', note: 'A5', pitched: false, env: [0.001, 0.05, 0, 0.04], vol: -14, color: 0xc8935a },
+  { id: 'ride', label: 'Ride', category: 'perc', synth: 'metal', pitched: false, vol: -26, color: 0xe0b23a },
+  { id: 'crash', label: 'Crash', category: 'perc', synth: 'noise', noise: 'white', env: [0.001, 0.6, 0, 0.3], vol: -18, color: 0xf2c14e },
+  // bajos
+  { id: 'subsine', label: 'Sub seno', category: 'bass', synth: 'synth', osc: 'sine', octave: 1, note: 'C1', env: [0.005, 0.3, 0.4, 0.2], vol: -8, color: 0x2f8a4e },
+  { id: 'reese', label: 'Reese', category: 'bass', synth: 'mono', osc: 'sawtooth', octave: 2, glide: 0.02, filterHz: 220, note: 'C2', color: 0x3b9a63 },
+  { id: 'pluckbass', label: 'Bajo pluck', category: 'bass', synth: 'synth', osc: 'triangle', octave: 2, env: [0.002, 0.18, 0.05, 0.1], note: 'C2', color: 0x5bb974 },
+  { id: 'growl', label: 'Gruñido', category: 'bass', synth: 'fm', octave: 2, glide: 0.01, note: 'C2', vol: -13, color: 0x1f6e44 },
+  // mallets & teclados
+  { id: 'marimba', label: 'Marimba', category: 'melody', synth: 'synth', osc: 'sine', env: [0.002, 0.28, 0, 0.2], note: 'C4', color: 0xc8935a },
+  { id: 'xylo', label: 'Xilófono', category: 'melody', synth: 'synth', osc: 'triangle', octave: 5, env: [0.001, 0.18, 0, 0.12], note: 'C5', color: 0xef8a3c },
+  { id: 'kalimba', label: 'Kalimba', category: 'melody', synth: 'synth', osc: 'sine', octave: 5, env: [0.002, 0.22, 0, 0.15], note: 'C5', color: 0xc8935a },
+  { id: 'musicbox', label: 'Cajita', category: 'melody', synth: 'synth', osc: 'sine', octave: 6, env: [0.001, 0.4, 0, 0.25], note: 'C6', vol: -12, color: 0xe86ea8 },
+  { id: 'organ', label: 'Órgano', category: 'pad', synth: 'synth', osc: 'square', env: [0.02, 0.1, 0.7, 0.2], note: 'C4', vol: -18, color: 0x6f42ab },
+  { id: 'saw', label: 'Saw lead', category: 'melody', synth: 'mono', osc: 'sawtooth', glide: 0.01, filterHz: 900, note: 'C4', color: 0x6f42ab },
+  { id: 'square', label: 'Chip', category: 'melody', synth: 'synth', osc: 'square', env: [0.003, 0.16, 0.1, 0.12], note: 'C4', vol: -16, color: 0x9b6bd0 },
+  { id: 'padwarm', label: 'Pad', category: 'pad', synth: 'am', osc: 'sine', env: [0.15, 0.3, 0.7, 0.5], note: 'C4', vol: -16, color: 0x7f6bd0 },
+
+  // ===== batch 2: animals, nature, fx & voice =====
+  // animales
+  { id: 'owl', label: 'Búho', category: 'animal', synth: 'fm', recipe: 'owl', color: 0x9b8bd0 },
+  { id: 'duck', label: 'Pato', category: 'animal', synth: 'mono', osc: 'sawtooth', recipe: 'duck', color: 0xf2b705 },
+  { id: 'cricket', label: 'Grillo', category: 'animal', synth: 'synth', osc: 'sine', recipe: 'cricket', vol: -16, color: 0x97c459 },
+  { id: 'cow', label: 'Vaca', category: 'animal', synth: 'mono', osc: 'sawtooth', recipe: 'moo', color: 0xd0a06b },
+  { id: 'sheep', label: 'Oveja', category: 'animal', synth: 'mono', osc: 'sawtooth', recipe: 'baa', color: 0xe7d6ac },
+  { id: 'bee', label: 'Abeja', category: 'animal', synth: 'mono', osc: 'sawtooth', recipe: 'buzz', vol: -14, color: 0xf2c14e },
+  { id: 'wolf', label: 'Lobo', category: 'animal', synth: 'fm', recipe: 'howl', color: 0x8a95a8 },
+  { id: 'rooster', label: 'Gallo', category: 'animal', synth: 'mono', osc: 'sawtooth', recipe: 'crow', color: 0xe2574c },
+  // naturaleza
+  { id: 'rain', label: 'Lluvia', category: 'fx', synth: 'noise', noise: 'pink', env: [0.05, 0.4, 0, 0.2], vol: -20, color: 0x7fb0d0 },
+  { id: 'wind', label: 'Viento', category: 'fx', synth: 'noise', noise: 'brown', env: [0.1, 0.5, 0, 0.3], vol: -18, color: 0xa8c0c8 },
+  { id: 'thunder', label: 'Trueno', category: 'fx', synth: 'membrane', note: 'C1', pitched: false, env: [0.001, 0.7, 0, 0.4], vol: -4, color: 0x6b6f8a },
+  { id: 'bubble', label: 'Burbuja', category: 'fx', synth: 'synth', osc: 'sine', recipe: 'bubble', color: 0x56b8ff },
+  { id: 'drip', label: 'Gota', category: 'fx', synth: 'synth', osc: 'sine', recipe: 'drip', color: 0x3fb0ac },
+  // fx
+  { id: 'laser', label: 'Láser', category: 'fx', synth: 'fm', recipe: 'laser', color: 0xef476f },
+  { id: 'coin', label: 'Moneda', category: 'fx', synth: 'synth', osc: 'square', recipe: 'coin', vol: -14, color: 0xf2b705 },
+  { id: 'powerup', label: 'Power', category: 'fx', synth: 'synth', osc: 'square', recipe: 'powerup', vol: -15, color: 0x97c459 },
+  { id: 'siren', label: 'Sirena', category: 'fx', synth: 'mono', osc: 'sawtooth', recipe: 'siren', color: 0xe2574c },
+  { id: 'warp', label: 'Warp', category: 'fx', synth: 'fm', recipe: 'warp', color: 0x6f42ab },
+  { id: 'glitch', label: 'Glitch', category: 'fx', synth: 'noise', noise: 'white', env: [0.001, 0.04, 0, 0.02], vol: -14, color: 0x4a7fd0 },
+  { id: 'beep', label: 'Beep', category: 'fx', synth: 'synth', osc: 'sine', octave: 5, env: [0.002, 0.1, 0, 0.06], note: 'C5', vol: -13, color: 0x3fb0ac },
+  { id: 'sparkle', label: 'Brillo', category: 'fx', synth: 'metal', pitched: false, vol: -24, color: 0xffd166 },
+  // voz
+  { id: 'yeah', label: 'Yeah', category: 'voice', synth: 'fm', recipe: 'vox', note: 'C4', color: 0xe86ea8 },
+  { id: 'whistle', label: 'Silbido', category: 'voice', synth: 'synth', osc: 'sine', recipe: 'whistle', vol: -12, color: 0xffd166 },
+  { id: 'hum', label: 'Hum', category: 'voice', synth: 'am', osc: 'sine', octave: 3, env: [0.05, 0.2, 0.6, 0.3], note: 'C3', vol: -15, color: 0xd48ab0 },
+
+  // ===== batch 3: keys, leads, plucks, pads, more perc & voice =====
+  { id: 'harp', label: 'Arpa', category: 'melody', synth: 'synth', osc: 'triangle', env: [0.003, 0.35, 0, 0.25], note: 'C4', color: 0x9b6bd0 },
+  { id: 'flute', label: 'Flauta', category: 'melody', synth: 'synth', osc: 'sine', octave: 5, env: [0.04, 0.15, 0.6, 0.2], note: 'C5', vol: -14, color: 0x7fd0ff },
+  { id: 'brass', label: 'Metales', category: 'melody', synth: 'fm', env: [0.02, 0.15, 0.6, 0.2], note: 'C4', vol: -14, color: 0xf2b705 },
+  { id: 'strings', label: 'Cuerdas', category: 'pad', synth: 'am', osc: 'sawtooth', env: [0.1, 0.2, 0.7, 0.4], note: 'C4', vol: -17, color: 0xd06bd0 },
+  { id: 'choir', label: 'Coro', category: 'pad', synth: 'am', osc: 'sine', env: [0.15, 0.2, 0.8, 0.5], note: 'C4', vol: -16, color: 0xe86ea8 },
+  { id: 'glock', label: 'Glockenspiel', category: 'melody', synth: 'metal', octave: 6, note: 'C6', vol: -24, color: 0x5dcaa5 },
+  { id: 'celesta', label: 'Celesta', category: 'melody', synth: 'synth', osc: 'sine', octave: 6, env: [0.002, 0.3, 0, 0.2], note: 'C6', vol: -13, color: 0xbfe3ff },
+  { id: 'banjo', label: 'Banjo', category: 'melody', synth: 'synth', osc: 'square', env: [0.002, 0.15, 0, 0.1], note: 'C4', vol: -15, color: 0xc8935a },
+  { id: 'sitar', label: 'Sitar', category: 'melody', synth: 'mono', osc: 'sawtooth', glide: 0.02, filterHz: 800, note: 'C4', color: 0xd0794a },
+  { id: 'accordion', label: 'Acordeón', category: 'pad', synth: 'am', osc: 'square', env: [0.05, 0.1, 0.7, 0.2], note: 'C4', vol: -18, color: 0xef8a3c },
+  { id: 'harmonica', label: 'Armónica', category: 'melody', synth: 'am', osc: 'sawtooth', env: [0.03, 0.1, 0.6, 0.2], note: 'C4', vol: -16, color: 0x5bb974 },
+  { id: 'epiano', label: 'E-Piano', category: 'melody', synth: 'fm', env: [0.005, 0.25, 0.2, 0.2], note: 'C4', vol: -14, color: 0x6f42ab },
+  { id: 'clav', label: 'Clavi', category: 'melody', synth: 'synth', osc: 'square', env: [0.002, 0.12, 0.05, 0.1], note: 'C4', vol: -15, color: 0x9b6bd0 },
+  { id: 'bellpad', label: 'Campanas', category: 'pad', synth: 'am', osc: 'sine', octave: 5, env: [0.2, 0.3, 0.7, 0.6], note: 'C5', vol: -17, color: 0x3fb0ac },
+  { id: 'pluckhi', label: 'Pluck alto', category: 'melody', synth: 'synth', osc: 'triangle', octave: 5, env: [0.003, 0.2, 0, 0.15], note: 'C5', color: 0x7f6bd0 },
+  { id: 'lead2', label: 'Lead 2', category: 'melody', synth: 'mono', osc: 'square', octave: 5, glide: 0.01, filterHz: 1200, note: 'C5', color: 0xef476f },
+  { id: 'supersaw', label: 'Super saw', category: 'melody', synth: 'mono', osc: 'sawtooth', glide: 0.01, filterHz: 1400, note: 'C4', vol: -13, color: 0x534ab7 },
+  { id: 'arp', label: 'Arpegio', category: 'melody', synth: 'synth', osc: 'triangle', octave: 5, env: [0.002, 0.12, 0, 0.08], note: 'C5', vol: -14, color: 0x1d9e75 },
+  { id: 'bass2', label: 'Bajo saw', category: 'bass', synth: 'mono', osc: 'sawtooth', octave: 2, filterHz: 300, note: 'C2', color: 0x3b9a63 },
+  { id: 'bass3', label: 'Bajo FM', category: 'bass', synth: 'fm', octave: 2, note: 'C2', vol: -13, color: 0x2f8a4e },
+  { id: 'wobble', label: 'Wobble', category: 'bass', synth: 'mono', osc: 'sawtooth', octave: 2, glide: 0.03, filterHz: 200, note: 'C2', color: 0x639922 },
+  { id: 'kick2', label: 'Bombo 2', category: 'drum', synth: 'membrane', note: 'C1', env: [0.001, 0.28, 0, 0.15], color: 0xd85a30 },
+  { id: 'snare2', label: 'Caja 2', category: 'drum', synth: 'noise', noise: 'pink', env: [0.001, 0.18, 0, 0], vol: -12, color: 0x378add },
+  { id: 'hat2', label: 'Hat abierto', category: 'drum', synth: 'noise', noise: 'white', env: [0.001, 0.18, 0, 0.05], vol: -18, color: 0xef9f27 },
+  { id: 'clap2', label: 'Clap 2', category: 'drum', synth: 'noise', noise: 'pink', env: [0.001, 0.12, 0, 0.03], vol: -13, color: 0xd85a30 },
+  { id: 'block', label: 'Bloque', category: 'perc', synth: 'synth', osc: 'square', note: 'C6', pitched: false, env: [0.001, 0.05, 0, 0.04], vol: -13, color: 0xc8935a },
+  { id: 'tri', label: 'Triángulo', category: 'perc', synth: 'metal', pitched: false, vol: -26, color: 0x5dcaa5 },
+  { id: 'doo', label: 'Doo', category: 'voice', synth: 'synth', osc: 'sine', env: [0.01, 0.15, 0.1, 0.1], note: 'C4', vol: -13, color: 0xe86ea8 },
+  { id: 'beatbox', label: 'Beatbox', category: 'voice', synth: 'membrane', note: 'C2', pitched: false, env: [0.001, 0.2, 0, 0.1], color: 0x9b6bd0 },
+  { id: 'ooh', label: 'Ooh', category: 'voice', synth: 'am', osc: 'sine', env: [0.08, 0.2, 0.6, 0.3], note: 'C4', vol: -15, color: 0xd48ab0 },
 ];
 
 export type Category = {
@@ -126,6 +249,7 @@ export type JamMeta = {
   tracks: number;
   version: number;
   instruments: string[]; // per-track instrument id ('' = empty slot)
+  pool: string[]; // the day's pickable sounds (subset of LIBRARY shown in the menu)
 };
 
 // A placed beat. Each one carries its OWN expression wave (fx) + its placer (by).

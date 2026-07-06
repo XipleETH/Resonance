@@ -2,8 +2,10 @@ import { redis, realtime } from '@devvit/web/server';
 import {
   decodeFx,
   encodeFx,
+  instrumentById,
   LIBRARY,
   MAX_FICHAS,
+  pickDailyPool,
   REFILL_MS,
   STEPS,
   TRACKS,
@@ -64,7 +66,11 @@ async function seedJam(postId: string, now: number): Promise<void> {
   const rnd = mulberry32(hashStr(day + postId));
   const bpm = 88 + Math.floor(rnd() * 5) * 4; // 88..104 in steps of 4
 
-  const seededIds = ['kick', 'hat', 'bass']; // slots 0,1,2 sound; 3-7 empty (community fills)
+  // The day's pickable palette (a random 24 of the whole library, same for everyone).
+  const pool = pickDailyPool(day);
+  const inCat = (cat: string): string | undefined => pool.find((id) => instrumentById(id)?.category === cat);
+  // Seed 3 starter rows FROM the pool (a beat, a bass, a melody if present); rest empty.
+  const seededIds = [inCat('drum') ?? pool[0], inCat('bass') ?? pool[1], inCat('melody') ?? pool[2]];
   const metaFields: Record<string, string> = {
     day,
     key: 'C',
@@ -76,6 +82,7 @@ async function seedJam(postId: string, now: number): Promise<void> {
     steps: String(STEPS),
     tracks: String(TRACKS),
     version: '1',
+    pool: pool.join(','),
   };
   for (let t = 0; t < TRACKS; t++) metaFields['inst' + t] = seededIds[t] ?? '';
   // Start CLEAN: 3 instruments + a tempo, but NO notes — the community builds from zero.
@@ -94,8 +101,11 @@ export async function getState(postId: string): Promise<JamState> {
   const instruments: string[] = [];
   for (let t = 0; t < tracks; t++) instruments.push(metaRaw['inst' + t] ?? '');
 
+  const day = metaRaw['day'] ?? todayStr(now);
+  const poolRaw = metaRaw['pool'];
+  const pool = poolRaw ? poolRaw.split(',').filter(Boolean) : pickDailyPool(day); // fallback for pre-pool posts
   const meta: JamMeta = {
-    day: metaRaw['day'] ?? todayStr(now),
+    day,
     key: metaRaw['key'] ?? 'C',
     scale: metaRaw['scale'] ?? 'minor-pentatonic',
     bpm: intOr(metaRaw['bpm'], 96),
@@ -106,6 +116,7 @@ export async function getState(postId: string): Promise<JamState> {
     tracks,
     version: intOr(metaRaw['version'], 1),
     instruments,
+    pool,
   };
 
   const gridRaw = await redis.hGetAll(gridKey(postId));

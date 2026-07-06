@@ -19,6 +19,7 @@ import {
   setPlaying,
 } from '../audio/jamEngine';
 import {
+  DAILY_POOL_SIZE,
   FLAT_FX,
   FX_TARGETS,
   instrumentById,
@@ -38,7 +39,7 @@ import {
 const KRAFT = '#cdb083';
 const PANEL_FILL = 0xe7d6ac;
 const INK = 0x3a2f22;
-const CRAYON = '"Comic Sans MS", "Chalkboard SE", "Marker Felt", "Segoe Print", cursive';
+const CRAYON = '"Gochi Hand", "Comic Sans MS", "Marker Felt", "Segoe Print", cursive';
 const key = (t: number, s: number): string => `${t}_${s}`;
 const keyText: Record<string, string> = { C: 'DO', D: 'RE', E: 'MI', F: 'FA', G: 'SOL', A: 'LA', B: 'SI' };
 
@@ -113,6 +114,7 @@ function defaultState(): JamState {
     meta: {
       day: 'DÍA 1', key: 'C', scale: 'minor-pentatonic', bpm: 96, bpmMin: 76, bpmMax: 116,
       t0: 0, steps: STEPS, tracks: TRACKS, version: 1, instruments: ['kick', 'hat', 'bass', '', '', '', '', ''],
+      pool: LIBRARY.slice(0, DAILY_POOL_SIZE).map((i) => i.id),
     },
     cells: [],
   };
@@ -165,8 +167,9 @@ export class Game extends Scene {
   private selRing!: Phaser.GameObjects.Graphics;
   private cells: Phaser.GameObjects.Image[][] = [];
   private labels: Phaser.GameObjects.Text[] = [];
+  private labelIcons: Phaser.GameObjects.Image[] = [];
   private fichaDots: Phaser.GameObjects.Arc[] = [];
-  private fxChips: Array<{ img: Phaser.GameObjects.Image; txt: Phaser.GameObjects.Text; type: FxType }> = [];
+  private fxChips: Array<{ img: Phaser.GameObjects.Image; icon: Phaser.GameObjects.Image; txt: Phaser.GameObjects.Text; type: FxType }> = [];
   private playhead!: Phaser.GameObjects.Rectangle;
   private title!: Phaser.GameObjects.Text;
   private dayChip!: Phaser.GameObjects.Image;
@@ -186,11 +189,12 @@ export class Game extends Scene {
   private resetImg!: Phaser.GameObjects.Image;
   private resetText!: Phaser.GameObjects.Text;
   private saveImg!: Phaser.GameObjects.Image;
+  private saveIcon!: Phaser.GameObjects.Image;
   private saveText!: Phaser.GameObjects.Text;
   private fsImg!: Phaser.GameObjects.Image;
-  private fsText!: Phaser.GameObjects.Text;
+  private fsIcon!: Phaser.GameObjects.Image;
   private ppImg!: Phaser.GameObjects.Image;
-  private ppText!: Phaser.GameObjects.Text;
+  private ppIcon!: Phaser.GameObjects.Image;
   private bgZone!: Phaser.GameObjects.Zone;
   private footer!: Phaser.GameObjects.Text;
   private toastText!: Phaser.GameObjects.Text;
@@ -199,7 +203,7 @@ export class Game extends Scene {
   private menuBackdrop!: Phaser.GameObjects.Zone;
   private menuPanel!: Phaser.GameObjects.Graphics;
   private menuTitle!: Phaser.GameObjects.Text;
-  private menuChips: Array<{ img: Phaser.GameObjects.Image; txt: Phaser.GameObjects.Text; id: string }> = [];
+  private menuChips: Array<{ img: Phaser.GameObjects.Image; icon: Phaser.GameObjects.Image; txt: Phaser.GameObjects.Text; id: string }> = [];
 
   private curStep = 0;
   private u = 1;
@@ -267,6 +271,9 @@ export class Game extends Scene {
         row.push(img);
       }
       this.cells.push(row);
+      const licon = this.add.image(0, 0, 'ic_add').setInteractive({ useHandCursor: true });
+      licon.on('pointerdown', () => this.onTrackLabel(t));
+      this.labelIcons.push(licon);
       const label = this.add
         .text(0, 0, '', { fontFamily: CRAYON, fontSize: '13px', color: '#4a3a22' })
         .setOrigin(0, 0.5)
@@ -282,9 +289,10 @@ export class Game extends Scene {
     this.exprLabel = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '12px', color: '#7a6a4a' });
     for (const tgt of FX_TARGETS) {
       const img = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
-      const txt = this.add.text(0, 0, `${tgt.emoji} ${tgt.label}`, { fontFamily: CRAYON, fontSize: '12px', color: '#4a3a22' }).setOrigin(0.5);
+      const icon = this.add.image(0, 0, `ic_fx_${tgt.type}`);
+      const txt = this.add.text(0, 0, tgt.label, { fontFamily: CRAYON, fontSize: '12px', color: '#4a3a22' }).setOrigin(0, 0.5);
       img.on('pointerdown', () => this.pickFxTarget(tgt.type));
-      this.fxChips.push({ img, txt, type: tgt.type });
+      this.fxChips.push({ img, icon, txt, type: tgt.type });
     }
     this.waveG = this.add.graphics();
     this.waveZone = this.add.zone(0, 0, 10, 10).setInteractive({ useHandCursor: true });
@@ -336,15 +344,16 @@ export class Game extends Scene {
       if (this.gate()) void this.commit();
     });
     this.saveText = this.add.text(0, 0, 'GUARDAR', { fontFamily: CRAYON, fontSize: '16px', color: '#fff9ec' }).setOrigin(0.5);
+    this.saveIcon = this.add.image(0, 0, 'ic_save');
     this.fsImg = this.add.image(0, 0, 'cb_pill').setTint(0xf2c14e);
-    this.fsText = this.add.text(0, 0, '⛶', { fontFamily: CRAYON, fontSize: '20px', color: '#5a4410' }).setOrigin(0.5);
+    this.fsIcon = this.add.image(0, 0, 'ic_fs');
     this.ppImg = this.add.image(0, 0, 'cb_pill').setTint(0x8fd6a0).setInteractive({ useHandCursor: true });
     this.ppImg.on('pointerdown', () => {
       if (this.gate()) this.togglePlayPause();
     });
-    this.ppText = this.add.text(0, 0, '▶', { fontFamily: CRAYON, fontSize: '18px', color: '#1c3a24' }).setOrigin(0.5);
+    this.ppIcon = this.add.image(0, 0, 'ic_play');
 
-    this.footer = this.add.text(0, 0, 'nadie montó esto — lo hizo la comunidad ✏️', { fontFamily: CRAYON, fontSize: '11px', color: '#8a7a58' }).setOrigin(0.5);
+    this.footer = this.add.text(0, 0, 'nadie montó esto — lo hizo la comunidad', { fontFamily: CRAYON, fontSize: '11px', color: '#8a7a58' }).setOrigin(0.5);
     this.toastText = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '15px', color: '#ffd1d1' }).setOrigin(0.5).setAlpha(0);
 
     this.menuDim = this.add.rectangle(0, 0, 10, 10, 0x201a12, 0.5).setOrigin(0.5).setDepth(50);
@@ -356,12 +365,19 @@ export class Game extends Scene {
     });
     this.menuPanel = this.add.graphics().setDepth(51);
     this.menuTitle = this.add.text(0, 0, 'elige un sonido', { fontFamily: CRAYON, fontSize: '15px', color: '#4a3a22' }).setOrigin(0.5).setDepth(52);
-    for (const inst of LIBRARY) {
-      const img = this.add.image(0, 0, 'cb_pill').setTint(lighten(inst.color, 0.35)).setDepth(52);
-      const txt = this.add.text(0, 0, `${inst.emoji} ${inst.label}`, { fontFamily: CRAYON, fontSize: '12px', color: '#3a2f22' }).setOrigin(0.5).setDepth(53);
-      img.on('pointerdown', () => this.pickInstrument(inst.id));
-      this.menuChips.push({ img, txt, id: inst.id });
+    // Fixed 24 slots (3x8); each day's pool fills them (assignPool). Slots keep their
+    // objects and just swap the id/icon/label, so the library can grow to any size.
+    for (let i = 0; i < DAILY_POOL_SIZE; i++) {
+      const img = this.add.image(0, 0, 'cb_pill').setDepth(52);
+      const icon = this.add.image(0, 0, 'ic_add').setDepth(53);
+      const txt = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '12px', color: '#3a2f22' }).setOrigin(0, 0.5).setDepth(53);
+      const slot = { img, icon, txt, id: '' };
+      img.on('pointerdown', () => {
+        if (slot.id) this.pickInstrument(slot.id);
+      });
+      this.menuChips.push(slot);
     }
+    this.assignPool();
     this.showMenu(false);
 
     onStep((step) => this.onStepVisual(step));
@@ -481,7 +497,7 @@ export class Game extends Scene {
     this.renderPlayPause();
   }
   private renderPlayPause(): void {
-    this.ppText.setText(isPlaying() ? '⏸' : '▶');
+    this.ppIcon.setTexture(isPlaying() ? 'ic_pause' : 'ic_play');
   }
 
   private webMode(): string {
@@ -653,6 +669,22 @@ export class Game extends Scene {
     this.bpm = state.meta.bpm;
     this.sharedCells.clear();
     for (const c of state.cells) this.sharedCells.set(key(c.track, c.step), { by: c.by, fx: c.fx });
+    this.assignPool();
+  }
+
+  /** Fill the 24 menu slots from the day's pool of pickable sounds. */
+  private assignPool(): void {
+    const pool = this.state.meta.pool ?? [];
+    for (let i = 0; i < this.menuChips.length; i++) {
+      const m = this.menuChips[i];
+      if (!m) continue;
+      const id = pool[i] ?? '';
+      m.id = id;
+      const inst = instrumentById(id);
+      m.icon.setTexture(inst ? `ic_${id}` : 'ic_add');
+      m.txt.setText(inst ? inst.label : '');
+      m.img.setTint(lighten(inst?.color ?? 0x999999, 0.35));
+    }
   }
 
   private subscribe(): void {
@@ -815,7 +847,7 @@ export class Game extends Scene {
   private pickFxTarget(type: FxType): void {
     if (!this.gate()) return;
     const k = this.selectedCell;
-    if (!k) return this.toast('toca un beat primero 👆', '#ffe0a0');
+    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
     const cur = this.effCellFx(k);
     this.setDraftFx(k, { type, depth: cur.depth, rate: cur.rate });
   }
@@ -830,11 +862,11 @@ export class Game extends Scene {
     if (!this.gate()) return;
     if (this.instrMenuOpen) return;
     const k = this.selectedCell;
-    if (!k) return this.toast('toca un beat primero 👆', '#ffe0a0');
+    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
     if (this.webMode() !== 'expanded') {
       // Unreachable in practice: inline, the DOM inlineCatcher sits over the canvas and
       // converts taps into expand (canvas taps can't produce the trusted click Devvit needs).
-      this.toast('abre pantalla completa ⛶ para editar la onda', '#ffe0a0');
+      this.toast('abre pantalla completa para editar la onda', '#ffe0a0');
       return;
     }
     const fx = this.effCellFx(k);
@@ -881,7 +913,7 @@ export class Game extends Scene {
 
   private resetSelectedWave(): void {
     const k = this.selectedCell;
-    if (!k) return this.toast('toca un beat primero 👆', '#ffe0a0');
+    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
     this.setDraftFx(k, { ...FLAT_FX });
   }
   private clearDraft(): void {
@@ -892,7 +924,7 @@ export class Game extends Scene {
     this.draftTempo = 0;
     this.refreshEngine();
     this.renderAll();
-    this.toast('borrador vaciado 🧹', '#ffe0a0');
+    this.toast('borrador vaciado', '#ffe0a0');
   }
 
   private refreshEngine(): void {
@@ -974,9 +1006,11 @@ export class Game extends Scene {
     if (open) this.menuBackdrop.setInteractive();
     else this.menuBackdrop.disableInteractive();
     for (const m of this.menuChips) {
-      m.img.setVisible(open);
-      m.txt.setVisible(open);
-      if (open) m.img.setInteractive({ useHandCursor: true });
+      const show = open && !!m.id; // empty slots (pool < 24) stay hidden
+      m.img.setVisible(show);
+      m.icon.setVisible(show);
+      m.txt.setVisible(show);
+      if (show) m.img.setInteractive({ useHandCursor: true });
       else m.img.disableInteractive();
     }
     this.syncDomButtons();
@@ -1012,8 +1046,12 @@ export class Game extends Scene {
       const rowi = Math.floor(i / cols);
       const cx = px + 12 * u + col * cw + cw / 2;
       const cy = py + 48 * u + rowi * (chH + 8 * u) + chH / 2;
-      m.img.setPosition(cx, cy).setDisplaySize(cw - 8 * u, chH);
-      m.txt.setPosition(cx, cy).setFontSize(11.5 * u);
+      const innerW = cw - 8 * u;
+      m.img.setPosition(cx, cy).setDisplaySize(innerW, chH);
+      const mIcSz = chH * 0.66;
+      const mLeft = cx - innerW / 2 + 7 * u;
+      m.icon.setPosition(mLeft + mIcSz / 2, cy).setDisplaySize(mIcSz, mIcSz);
+      m.txt.setPosition(mLeft + mIcSz + 4 * u, cy).setFontSize(11 * u);
     }
   }
 
@@ -1044,7 +1082,7 @@ export class Game extends Scene {
   }
 
   private renderFs(): void {
-    this.fsText.setText(this.webMode() === 'expanded' ? '⤡ salir' : '⛶');
+    this.fsIcon.setTexture(this.webMode() === 'expanded' ? 'ic_exit' : 'ic_fs');
   }
 
   private renderCell(t: number, s: number): void {
@@ -1060,11 +1098,13 @@ export class Game extends Scene {
 
   private renderLabel(t: number): void {
     const label = this.labels[t];
-    if (!label) return;
+    const icon = this.labelIcons[t];
+    if (!label || !icon) return;
     const inst = instrumentById(this.effInstrument(t));
     const sel = this.selectedTrack === t;
-    label.setText(inst ? `${inst.emoji} ${inst.label}` : '＋ añadir');
+    label.setText(inst ? inst.label : 'añadir');
     label.setColor(sel ? '#e2574c' : inst ? '#4a3a22' : '#b9a888');
+    icon.setTexture(inst ? `ic_${inst.id}` : 'ic_add').setAlpha(inst ? 1 : 0.5);
   }
 
   private renderFichas(): void {
@@ -1081,20 +1121,20 @@ export class Game extends Scene {
 
   private renderHeader(): void {
     const m = this.state.meta;
-    this.dayText.setText(`✦ ${m.day} · clave ${keyText[m.key] ?? m.key} menor`);
-    this.presenceText.setText(`● ${Math.max(1, this.presence)} tocando en vivo`);
+    this.dayText.setText(`${m.day} · clave ${keyText[m.key] ?? m.key} menor`);
+    this.presenceText.setText(`${Math.max(1, this.presence)} tocando en vivo`);
     this.layoutBpm();
   }
 
   private renderExpression(): void {
     const k = this.selectedCell;
     if (!k) {
-      this.exprLabel.setText('🎚️ ONDA — toca un beat');
+      this.exprLabel.setText('ONDA — toca un beat');
     } else {
       const [t] = k.split('_').map(Number);
       const inst = instrumentById(this.effInstrument(t ?? 0));
       const free = this.ownsCell(k);
-      this.exprLabel.setText(`🎚️ ONDA · ${inst ? inst.label : 'beat'} ${free ? '(tuyo · gratis)' : '(ajeno · 1 ficha)'}`);
+      this.exprLabel.setText(`ONDA · ${inst ? inst.label : 'beat'} ${free ? '(tuyo · gratis)' : '(ajeno · 1 ficha)'}`);
     }
     const active = k ? this.effCellFx(k) : null;
     for (const c of this.fxChips) c.img.setAlpha(active !== null && active.depth > 0 && c.type === active.type ? 1 : 0.5);
@@ -1193,10 +1233,10 @@ export class Game extends Scene {
     const fsSz = 40 * u;
     const fsCx = W - 8 * u - fsSz / 2;
     this.fsImg.setPosition(fsCx, 24 * u).setDisplaySize(fsSz, 32 * u);
-    this.fsText.setPosition(fsCx, 24 * u).setFontSize(19 * u);
+    this.fsIcon.setPosition(fsCx, 24 * u).setDisplaySize(24 * u, 24 * u);
     const ppCx = fsCx - fsSz - 6 * u;
     this.ppImg.setPosition(ppCx, 24 * u).setDisplaySize(fsSz, 32 * u);
-    this.ppText.setPosition(ppCx, 24 * u).setFontSize(18 * u);
+    this.ppIcon.setPosition(ppCx, 24 * u).setDisplaySize(22 * u, 22 * u);
     const presRight = ppCx - fsSz / 2 - 8 * u;
     this.presenceText.setPosition(presRight, 24 * u).setFontSize(13 * u);
     this.sizePill(this.presenceChip, this.presenceText, 12 * u, 1, 0.5);
@@ -1222,7 +1262,10 @@ export class Game extends Scene {
           ?.setPosition(left + s * cellW + cellW / 2, top + t * rowH + rowH / 2)
           .setDisplaySize(cellW - 3 * u, rowH - 6 * u);
       }
-      this.labels[t]?.setPosition(12 * u, top + t * rowH + rowH / 2).setFontSize(Math.min(14 * u, rowH * 0.42));
+      const rowCy = top + t * rowH + rowH / 2;
+      const licSz = Math.min(rowH * 0.72, 20 * u);
+      this.labelIcons[t]?.setPosition(10 * u + licSz / 2, rowCy).setDisplaySize(licSz, licSz);
+      this.labels[t]?.setPosition(10 * u + licSz + 4 * u, rowCy).setFontSize(Math.min(12 * u, rowH * 0.4));
     }
     this.playhead.setSize(cellW, rowH * TRACKS);
     this.onStepVisual(this.curStep);
@@ -1238,7 +1281,10 @@ export class Game extends Scene {
       if (!c) continue;
       const cx = 14 * u + (i % 3) * (chipW + 6 * u) + chipW / 2;
       c.img.setPosition(cx, fxY).setDisplaySize(chipW, chipH);
-      c.txt.setPosition(cx, fxY).setFontSize(12 * u);
+      const fxIcSz = chipH * 0.72;
+      const fxLeft = cx - chipW / 2 + 8 * u;
+      c.icon.setPosition(fxLeft + fxIcSz / 2, fxY).setDisplaySize(fxIcSz, fxIcSz);
+      c.txt.setPosition(fxLeft + fxIcSz + 4 * u, fxY).setFontSize(11 * u);
     }
     // wave bar + reset button beside it
     const rBtn = 40 * u;
@@ -1259,7 +1305,8 @@ export class Game extends Scene {
     const saveW = Math.min(180 * u, W * 0.42);
     const saveCx = W - 12 * u - saveW / 2;
     this.saveImg.setPosition(saveCx, by).setDisplaySize(saveW, 42 * u);
-    this.saveText.setPosition(saveCx, by).setFontSize(16 * u);
+    this.saveIcon.setPosition(saveCx - saveW / 2 + 20 * u, by).setDisplaySize(26 * u, 26 * u);
+    this.saveText.setPosition(saveCx + 12 * u, by).setFontSize(16 * u);
 
     this.footer.setPosition(W / 2, H - 12 * u).setFontSize(11 * u);
     this.toastText.setPosition(W / 2, top + gridH * 0.4).setFontSize(15 * u);

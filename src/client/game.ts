@@ -42,6 +42,17 @@ const StartGame = (parent: string) => {
   return game;
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+// Wait for the bundled crayon font so Phaser's first text render uses it (Phaser measures
+// text at create time and won't reflow later). Cap the wait so a font failure never hangs.
+const withFont = async (): Promise<void> => {
+  try {
+    const load = document.fonts.load('16px "Gochi Hand"').then(() => document.fonts.ready);
+    const cap = new Promise((r) => setTimeout(r, 1500));
+    await Promise.race([load, cap]);
+  } catch {
+    /* fall back to the CSS stack */
+  }
   StartGame('game-container');
-});
+};
+
+document.addEventListener('DOMContentLoaded', () => void withFont());

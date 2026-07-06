@@ -1,3 +1,12 @@
+/* Bundled locally — the Devvit web view blocks external font CDNs. Gochi Hand (OFL). */
+@font-face {
+  font-family: 'Gochi Hand';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('./fonts/gochi-hand.woff2') format('woff2');
+}
+
 body {
   margin: 0;
   padding: 0;
