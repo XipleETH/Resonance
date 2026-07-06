@@ -11,6 +11,7 @@ import {
   initAudio,
   isPlaying,
   onStep,
+  resumeAudio,
   setActiveCells,
   setBpm,
   setInstruments,
@@ -111,13 +112,20 @@ function defaultState(): JamState {
   return {
     meta: {
       day: 'DÍA 1', key: 'C', scale: 'minor-pentatonic', bpm: 96, bpmMin: 76, bpmMax: 116,
-      t0: 0, steps: STEPS, tracks: TRACKS, version: 1, instruments: ['kick', 'hat', 'bass', '', '', ''],
+      t0: 0, steps: STEPS, tracks: TRACKS, version: 1, instruments: ['kick', 'hat', 'bass', '', '', '', '', ''],
     },
     cells: [],
   };
 }
 
-type WaveDrag = { sx: number; sy: number; d0: number; r0: number; cell: string };
+// What the user tapped inline, stashed to sessionStorage across the expand reload so the
+// flow can continue once the (fresh) expanded page boots.
+type PendingIntent =
+  | { kind: 'cell'; t: number; s: number }
+  | { kind: 'label'; t: number }
+  | { kind: 'tempo'; delta: number }
+  | { kind: 'expand' };
+const PENDING_KEY = 'resonance-pending';
 
 export class Game extends Scene {
   private state: JamState = defaultState();
@@ -133,6 +141,9 @@ export class Game extends Scene {
   private draftTempo = 0;
   private selectedTrack = -1;
   private selectedCell: string | null = null;
+  // Beat tapped on an empty row: after the user picks an instrument it gets placed+selected,
+  // so "first beat brings the instrument + the beat" for a single ficha.
+  private pendingPlaceCell: string | null = null;
   private instrMenuOpen = false;
   private audioReady = false;
 
@@ -194,7 +205,23 @@ export class Game extends Scene {
   private u = 1;
   private gridBox = { left: 0, top: 0, cellW: 10, rowH: 10 };
   private waveBox = { x: 0, y: 0, w: 10, h: 10 };
-  private waveDrag: WaveDrag | null = null;
+  private waveDrag: { sx: number; sy: number; d0: number; r0: number; cell: string } | null = null;
+  // Devvit's requestExpandedMode/exitExpandedMode ONLY accept a trusted native `click`,
+  // and Phaser preventDefaults touchstart on the canvas which suppresses the synthetic
+  // click on mobile — so canvas taps can never trigger them. fsBtn is a real DOM button
+  // over the ⛶ pill; inlineCatcher is a full-canvas DOM button that (inline only) turns
+  // any tap into "stash what you tapped + go fullscreen", so the app is used expanded.
+  private fsBtn: HTMLButtonElement | null = null;
+  private inlineCatcher: HTMLButtonElement | null = null;
+  private wokeByPointer = false;
+  private audioInitting = false;
+  private readonly syncOnScroll = (): void => this.syncDomButtons();
+  // Real DOM gesture on the canvas (expanded mode): unlock audio, and resume a context
+  // that a no-gesture autoplay attempt may have left suspended.
+  private readonly unlockAudio = (): void => {
+    this.ensureAudio();
+    void resumeAudio();
+  };
   private resetTimer: Phaser.Time.TimerEvent | undefined = undefined;
   private resetHeld = false;
 
@@ -261,7 +288,7 @@ export class Game extends Scene {
     }
     this.waveG = this.add.graphics();
     this.waveZone = this.add.zone(0, 0, 10, 10).setInteractive({ useHandCursor: true });
-    this.waveZone.on('pointerdown', (p: Phaser.Input.Pointer) => this.startWaveDrag(p));
+    this.waveZone.on('pointerdown', (p: Phaser.Input.Pointer) => this.onBarDown(p));
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onWaveMove(p));
     this.input.on('pointerup', () => {
       this.waveDrag = null;
@@ -309,10 +336,7 @@ export class Game extends Scene {
       if (this.gate()) void this.commit();
     });
     this.saveText = this.add.text(0, 0, 'GUARDAR', { fontFamily: CRAYON, fontSize: '16px', color: '#fff9ec' }).setOrigin(0.5);
-    this.fsImg = this.add.image(0, 0, 'cb_pill').setTint(0xf2c14e).setInteractive({ useHandCursor: true });
-    this.fsImg.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      if (this.gate()) this.toggleFullscreen(p);
-    });
+    this.fsImg = this.add.image(0, 0, 'cb_pill').setTint(0xf2c14e);
     this.fsText = this.add.text(0, 0, '⛶', { fontFamily: CRAYON, fontSize: '20px', color: '#5a4410' }).setOrigin(0.5);
     this.ppImg = this.add.image(0, 0, 'cb_pill').setTint(0x8fd6a0).setInteractive({ useHandCursor: true });
     this.ppImg.on('pointerdown', () => {
@@ -326,6 +350,7 @@ export class Game extends Scene {
     this.menuDim = this.add.rectangle(0, 0, 10, 10, 0x201a12, 0.5).setOrigin(0.5).setDepth(50);
     this.menuBackdrop = this.add.zone(0, 0, 10, 10).setOrigin(0.5).setDepth(50).setInteractive();
     this.menuBackdrop.on('pointerdown', () => {
+      this.pendingPlaceCell = null; // dismissed the picker without choosing → no bundled beat
       this.showMenu(false);
       this.renderAll();
     });
@@ -340,8 +365,16 @@ export class Game extends Scene {
     this.showMenu(false);
 
     onStep((step) => this.onStepVisual(step));
+    this.setupDomButtons();
     this.layout();
     this.scale.on('resize', () => this.layout());
+    // Keep the DOM buttons pinned to their canvas spots as the feed scrolls / viewport changes.
+    window.addEventListener('scroll', this.syncOnScroll, { passive: true });
+    window.addEventListener('resize', this.syncOnScroll);
+    // In expanded mode the canvas receives taps directly. A DOM listener (not Phaser's,
+    // which dispatches in the game loop, outside the gesture) guarantees the audio unlock
+    // / context-resume runs inside the user gesture.
+    this.game.canvas.addEventListener('pointerdown', this.unlockAudio);
     this.events.once('shutdown', () => this.shutdown());
     void this.boot();
   }
@@ -382,19 +415,35 @@ export class Game extends Scene {
       this.refreshEngine();
     }
     this.renderAll();
+    this.replayPendingIntent(); // continue the flow if we just arrived via an inline-tap expand
+    // In fullscreen the user already committed to interacting, so start audio on load. The
+    // browser may still require a gesture — unlockAudio (canvas pointerdown) is the fallback.
+    if (this.webMode() === 'expanded') {
+      this.active = true;
+      this.ensureAudio();
+    }
   }
 
-  /** Unlock + start audio on the first user interaction (no start screen). */
+  /**
+   * Unlock + start audio. Marks audioReady only AFTER initAudio resolves, so if the
+   * browser blocks a no-gesture attempt (initAudio's Tone.start() stays pending until a
+   * gesture), the first real touch's resumeAudio() un-suspends the context and the same
+   * pending init completes — no double init (audioInitting guards that).
+   */
   private ensureAudio(): void {
-    if (this.audioReady) return;
-    this.audioReady = true;
+    if (this.audioReady || this.audioInitting) return;
+    this.audioInitting = true;
     void initAudio()
       .then(() => {
+        this.audioReady = true;
         setKey(this.state.meta.key);
         this.refreshEngine();
         this.claimAudio();
       })
-      .catch((e) => console.error('audio init failed:', e));
+      .catch((e) => console.error('audio init failed:', e))
+      .finally(() => {
+        this.audioInitting = false;
+      });
   }
 
   /** Claim playback for this post and tell all other posts to pause. */
@@ -422,6 +471,7 @@ export class Game extends Scene {
   }
   private goSleep(): void {
     this.active = false;
+    this.waveDrag = null;
     if (this.audioReady) setPlaying(false);
     this.renderPlayPause();
   }
@@ -441,14 +491,159 @@ export class Game extends Scene {
       return 'inline';
     }
   }
-  private toggleFullscreen(p: Phaser.Input.Pointer): void {
-    const ev = p.event as MouseEvent;
+  private toggleFullscreen(ev: MouseEvent): void {
     try {
       if (this.webMode() === 'expanded') exitExpandedMode(ev);
       else requestExpandedMode(ev, 'game');
     } catch {
       /* already in the requested mode */
     }
+  }
+
+  /**
+   * Invisible DOM buttons over the ⛶ pill (always) and the wave bar (inline only).
+   * Devvit's expand/exit APIs reject anything that isn't a trusted native `click`, and
+   * taps on the Phaser canvas never produce one (Phaser preventDefaults touchstart), so
+   * these are the only reliable way to switch modes from a touch.
+   */
+  private setupDomButtons(): void {
+    const make = (): HTMLButtonElement => {
+      const b = document.createElement('button');
+      const s = b.style;
+      s.position = 'fixed';
+      s.zIndex = '10';
+      s.background = 'transparent';
+      s.border = 'none';
+      s.padding = '0';
+      s.margin = '0';
+      s.cursor = 'pointer';
+      s.display = 'none';
+      s.setProperty('-webkit-tap-highlight-color', 'transparent');
+      document.body.appendChild(b);
+      return b;
+    };
+    this.fsBtn = make();
+    this.fsBtn.addEventListener('click', (ev: MouseEvent) => {
+      if (!this.gate()) return;
+      if (this.instrMenuOpen) return;
+      this.toggleFullscreen(ev);
+    });
+    // Full-canvas catcher (inline only). Being a real DOM button it yields the trusted
+    // click Devvit needs. Play/pause is handled inline here; everything else stashes what
+    // was tapped and expands, so the flow resumes on the (reloaded) expanded page.
+    this.inlineCatcher = make();
+    this.inlineCatcher.style.zIndex = '9'; // below fsBtn (10) so the ⛶ pill keeps its taps
+    this.inlineCatcher.addEventListener('click', (ev: MouseEvent) => this.onInlineTap(ev));
+    // pointerdown fires at the START of ANY touch — including a swipe/scroll, which never
+    // produces a `click`. Use it to wake + start audio "when the finger passes over the
+    // post" (the autoplay feel), WITHOUT expanding (expand stays on tap/click only).
+    this.inlineCatcher.addEventListener('pointerdown', () => {
+      this.wokeByPointer = !this.active;
+      if (this.wokeByPointer) this.activate();
+    });
+  }
+
+  private onInlineTap(ev: MouseEvent): void {
+    if (this.webMode() === 'expanded') return; // catcher is hidden expanded; safety
+    const woke = this.wokeByPointer; // did THIS gesture's pointerdown just wake (and start) the post?
+    this.wokeByPointer = false;
+    const rect = this.game.canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const gx = (ev.clientX - rect.left) * (this.scale.width / rect.width);
+    const gy = (ev.clientY - rect.top) * (this.scale.height / rect.height);
+    // Play/pause stays inline so people can listen in the feed without expanding. If this
+    // gesture just woke+started the post, don't immediately toggle it back to pause.
+    if (this.ppImg.getBounds().contains(gx, gy)) {
+      if (!woke && this.gate()) this.togglePlayPause();
+      return;
+    }
+    if (!this.active) {
+      this.activate(); // safety: pointerdown normally already woke it
+      return;
+    }
+    try {
+      sessionStorage.setItem(PENDING_KEY, JSON.stringify(this.hitTestIntent(gx, gy)));
+    } catch {
+      /* private mode / storage disabled → just expand */
+    }
+    try {
+      requestExpandedMode(ev, 'game');
+    } catch {
+      this.toast('no se pudo abrir pantalla completa', '#ffe0a0');
+    }
+  }
+
+  /** Which control the inline tap landed on (game coords), for replay after expanding. */
+  private hitTestIntent(gx: number, gy: number): PendingIntent {
+    if (this.tempoDown.getBounds().contains(gx, gy)) return { kind: 'tempo', delta: -1 };
+    if (this.tempoUp.getBounds().contains(gx, gy)) return { kind: 'tempo', delta: 1 };
+    const { left, top, cellW, rowH } = this.gridBox;
+    const inRows = gy >= top && gy < top + rowH * TRACKS;
+    if (inRows && gx >= left && gx < left + cellW * STEPS) {
+      const s = Phaser.Math.Clamp(Math.floor((gx - left) / cellW), 0, STEPS - 1);
+      const t = Phaser.Math.Clamp(Math.floor((gy - top) / rowH), 0, TRACKS - 1);
+      return { kind: 'cell', t, s };
+    }
+    if (inRows && gx < left) {
+      return { kind: 'label', t: Phaser.Math.Clamp(Math.floor((gy - top) / rowH), 0, TRACKS - 1) };
+    }
+    return { kind: 'expand' };
+  }
+
+  /** After the expand reload, resume whatever the user tapped inline. */
+  private replayPendingIntent(): void {
+    let raw: string | null = null;
+    try {
+      raw = sessionStorage.getItem(PENDING_KEY);
+      if (raw) sessionStorage.removeItem(PENDING_KEY); // clear-on-read: never double-apply
+    } catch {
+      return;
+    }
+    if (!raw || this.webMode() !== 'expanded') return;
+    let intent: PendingIntent;
+    try {
+      intent = JSON.parse(raw) as PendingIntent;
+    } catch {
+      return;
+    }
+    this.active = true; // arrived by a deliberate expand → treat as awake (audio unlocks on first tap)
+    switch (intent.kind) {
+      case 'cell':
+        this.tapCell(intent.t, intent.s);
+        break;
+      case 'label':
+        this.selectedTrack = intent.t;
+        this.showMenu(true); // tapping an instrument name → open its picker, ready to choose
+        this.renderAll();
+        break;
+      case 'tempo':
+        this.stageTempo(intent.delta);
+        break;
+      case 'expand':
+        this.renderAll();
+        break;
+    }
+  }
+
+  /** Align the DOM buttons with their canvas counterparts (game coords → CSS px). */
+  private syncDomButtons(): void {
+    const rect = this.game.canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const sx = rect.width / this.scale.width;
+    const sy = rect.height / this.scale.height;
+    const put = (el: HTMLButtonElement | null, x: number, y: number, w: number, h: number, show: boolean): void => {
+      if (!el) return;
+      el.style.left = `${rect.left + x * sx}px`;
+      el.style.top = `${rect.top + y * sy}px`;
+      el.style.width = `${w * sx}px`;
+      el.style.height = `${h * sy}px`;
+      el.style.display = show ? 'block' : 'none';
+    };
+    const fb = this.fsImg.getBounds();
+    put(this.fsBtn, fb.x, fb.y, fb.width, fb.height, !this.instrMenuOpen);
+    // Inline: the catcher covers the whole canvas so any tap can expand. Expanded: hidden,
+    // so the canvas is interacted with directly (wave drag, etc.).
+    put(this.inlineCatcher, 0, 0, this.scale.width, this.scale.height, this.webMode() !== 'expanded' && !this.instrMenuOpen);
   }
 
   private applyServerState(state: JamState): void {
@@ -519,8 +714,12 @@ export class Game extends Scene {
   }
 
   private pendingCost(): number {
-    let cost = this.draftPlace.size + this.draftInstr.size + Math.ceil(Math.abs(this.draftTempo) / 2);
-    for (const k of this.draftRemove) cost += this.ownsCell(k) ? 0 : 1;
+    // Choosing an instrument for an EMPTY row is free (it rides on the first beat's ficha);
+    // changing a row that already had an instrument costs 1.
+    let instrCost = 0;
+    for (const [t] of this.draftInstr) if ((this.instruments[t] ?? '') !== '') instrCost += 1;
+    let cost = this.draftPlace.size + instrCost + Math.ceil(Math.abs(this.draftTempo) / 2);
+    cost += this.draftRemove.size; // removing a committed beat always costs a ficha (even yours)
     for (const [k, fx] of this.draftCellFx) {
       if (this.draftPlace.has(k)) continue; // fx rides on the place action (free)
       if (this.fxKey(fx) === this.fxKey(this.sharedCells.get(k)?.fx ?? { ...FLAT_FX })) continue;
@@ -540,6 +739,7 @@ export class Game extends Scene {
     } else if (!this.cellActive(k)) {
       if (this.effInstrument(t) === '') {
         this.selectedTrack = t;
+        this.pendingPlaceCell = k; // place + select this beat once an instrument is chosen
         this.showMenu(true);
         this.renderAll();
         return;
@@ -554,7 +754,7 @@ export class Game extends Scene {
         this.draftCellFx.delete(k);
         this.selectedCell = null;
       } else {
-        if (this.pendingCost() + (this.ownsCell(k) ? 0 : 1) > this.energy) return this.flashNoFichas();
+        if (this.pendingCost() + 1 > this.energy) return this.flashNoFichas();
         this.draftRemove.add(k);
       }
     } else {
@@ -566,6 +766,7 @@ export class Game extends Scene {
 
   private onTrackLabel(t: number): void {
     if (!this.gate()) return;
+    this.pendingPlaceCell = null; // opening the picker from the label = no bundled beat
     if (this.selectedTrack === t) this.showMenu(!this.instrMenuOpen);
     else {
       this.selectedTrack = t;
@@ -577,13 +778,35 @@ export class Game extends Scene {
   private pickInstrument(id: string): void {
     const t = this.selectedTrack;
     if (t < 0) return;
-    const alreadyStaged = this.draftInstr.has(t);
-    if (!alreadyStaged && id !== this.instruments[t] && this.pendingCost() + 1 > this.energy) {
+    const place = this.pendingPlaceCell; // the beat to bundle-place (from tapping an empty row)
+    this.pendingPlaceCell = null;
+
+    // Stage the instrument (toggle off if re-picking the current one). Remember the prior
+    // draft so we can roll back if the whole thing can't be afforded.
+    const hadDraft = this.draftInstr.has(t);
+    const prevDraft = this.draftInstr.get(t);
+    if (id === this.instruments[t]) this.draftInstr.delete(t);
+    else this.draftInstr.set(t, id);
+
+    // Bundle: place + select the beat the user originally tapped on this (empty) row.
+    const placedNow = !!place && !this.cellActive(place) && !this.draftPlace.has(place);
+    if (place && placedNow) {
+      this.draftPlace.add(place);
+      this.selectedCell = place;
+    }
+
+    // Cost is computed by pendingCost (instrument-from-empty is free), so a first beat on a
+    // fresh row is exactly 1 ficha. Roll back if it doesn't fit.
+    if (this.pendingCost() > this.energy) {
+      if (place && placedNow) {
+        this.draftPlace.delete(place);
+        this.selectedCell = null;
+      }
+      if (hadDraft) this.draftInstr.set(t, prevDraft as string);
+      else this.draftInstr.delete(t);
       this.flashNoFichas();
       return;
     }
-    if (id === this.instruments[t]) this.draftInstr.delete(t);
-    else this.draftInstr.set(t, id);
     this.showMenu(false);
     this.refreshEngine();
     this.renderAll();
@@ -597,11 +820,23 @@ export class Game extends Scene {
     this.setDraftFx(k, { type, depth: cur.depth, rate: cur.rate });
   }
 
-  private startWaveDrag(p: Phaser.Input.Pointer): void {
+  // ---- wave drag ------------------------------------------------------------
+  // The Reddit feed scrolls at the NATIVE layer, above the web view, so free dragging
+  // inside the inline post is impossible (the gesture gets stolen mid-drag; every web
+  // lever — touch-action, preventDefault, pointer capture — failed on device). So:
+  // INLINE → touching the bar jumps straight to expanded mode, where the drag is fluid.
+  // EXPANDED → the original free 2-axis drag (Y = strength, X = speed).
+  private onBarDown(p: Phaser.Input.Pointer): void {
     if (!this.gate()) return;
     if (this.instrMenuOpen) return;
     const k = this.selectedCell;
     if (!k) return this.toast('toca un beat primero 👆', '#ffe0a0');
+    if (this.webMode() !== 'expanded') {
+      // Unreachable in practice: inline, the DOM inlineCatcher sits over the canvas and
+      // converts taps into expand (canvas taps can't produce the trusted click Devvit needs).
+      this.toast('abre pantalla completa ⛶ para editar la onda', '#ffe0a0');
+      return;
+    }
     const fx = this.effCellFx(k);
     this.waveDrag = { sx: p.x, sy: p.y, d0: fx.depth, r0: fx.rate, cell: k };
   }
@@ -744,6 +979,7 @@ export class Game extends Scene {
       if (open) m.img.setInteractive({ useHandCursor: true });
       else m.img.disableInteractive();
     }
+    this.syncDomButtons();
     if (open) this.layoutMenu();
   }
 
@@ -1029,6 +1265,7 @@ export class Game extends Scene {
     this.toastText.setPosition(W / 2, top + gridH * 0.4).setFontSize(15 * u);
 
     if (this.instrMenuOpen) this.layoutMenu();
+    this.syncDomButtons();
     this.renderAll();
   }
 
@@ -1037,6 +1274,13 @@ export class Game extends Scene {
   }
 
   private shutdown(): void {
+    this.fsBtn?.remove();
+    this.fsBtn = null;
+    this.inlineCatcher?.remove();
+    this.inlineCatcher = null;
+    this.game.canvas.removeEventListener('pointerdown', this.unlockAudio);
+    window.removeEventListener('scroll', this.syncOnScroll);
+    window.removeEventListener('resize', this.syncOnScroll);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.conn) void this.conn.disconnect();
     window.removeEventListener('blur', this.pauseHandler);

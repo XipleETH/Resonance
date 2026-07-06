@@ -3,7 +3,8 @@
  *
  * Lessons baked in from the on-device spike (Android Reddit webview):
  *  - polyphony ceiling ~8-12 voices → use ONE monophonic synth per track
- *    (max simultaneous voices = number of tracks = 6).
+ *    (max simultaneous voices = number of tracks = 8; near the low end of the
+ *    measured ceiling, so watch for distortion on device — a Limiter is in place).
  *  - short envelopes + a master Limiter so stacked peaks don't distort.
  *  - lightweight synths only.
  *
@@ -343,4 +344,17 @@ export function setPlaying(on: boolean): void {
 
 export function isPlaying(): boolean {
   return playing;
+}
+
+/**
+ * Resume the AudioContext if a no-gesture autoplay attempt (on the fresh expanded page)
+ * left it suspended. MUST be called from inside a user gesture to actually take effect.
+ */
+export async function resumeAudio(): Promise<void> {
+  try {
+    const ctx = Tone.getContext();
+    if (ctx.state !== 'running') await ctx.resume();
+  } catch {
+    /* ignore */
+  }
 }

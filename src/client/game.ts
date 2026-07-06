@@ -20,6 +20,11 @@ const config: Phaser.Types.Core.GameConfig = {
   backgroundColor: '#cdb083',
   // Tone.js owns the single AudioContext; stop Phaser from creating its own.
   audio: { noAudio: true },
+  // Don't let Phaser listen for touches on `window`. Inline, the DOM catcher sits over the
+  // canvas; a DRAG produces no `click` (so it just scrolls) but its touchstart still bubbles
+  // to window — and Phaser's window listener would process it against the grid, selecting a
+  // beat without expanding. Canvas-only listeners keep taps→expand and drags→scroll clean.
+  input: { windowEvents: false },
   render: { antialias: true, roundPixels: true },
   scale: {
     mode: Phaser.Scale.FIT,

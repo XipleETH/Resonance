@@ -4,7 +4,7 @@
  */
 
 export const STEPS = 16;
-export const TRACKS = 6;
+export const TRACKS = 8;
 export const MAX_FICHAS = 4;
 export const REFILL_MS = 12 * 60 * 60 * 1000; // energy refills to MAX every 12h
 

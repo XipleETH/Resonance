@@ -64,7 +64,7 @@ async function seedJam(postId: string, now: number): Promise<void> {
   const rnd = mulberry32(hashStr(day + postId));
   const bpm = 88 + Math.floor(rnd() * 5) * 4; // 88..104 in steps of 4
 
-  const seededIds = ['kick', 'hat', 'bass']; // slots 0,1,2 sound; 3,4,5 empty
+  const seededIds = ['kick', 'hat', 'bass']; // slots 0,1,2 sound; 3-7 empty (community fills)
   const metaFields: Record<string, string> = {
     day,
     key: 'C',
@@ -149,17 +149,22 @@ export async function commit(
   for (const c of state.cells) ownerOf.set(`${c.track}_${c.step}`, c.by);
   const mine = (k: string): boolean => ownerOf.get(k) === userId;
 
-  // place a beat = 1; edit/remove YOUR OWN beat = 0, someone else's = 1;
-  // change instrument = 1; tempo = 1 per 2 BPM.
+  // place a beat = 1; removing a committed beat = 1 (even your own, so saves stick);
+  // editing YOUR OWN beat's wave = 0, someone else's = 1;
+  // choosing an instrument for an EMPTY row = 0 (rides on the first beat's ficha), changing
+  // an existing one = 1; tempo = 1 per 2 BPM.
   const actionCost = (a: JamAction): number => {
     switch (a.kind) {
       case 'remove':
+        return 1;
       case 'setCellFx':
         return mine(`${a.track}_${a.step}`) ? 0 : 1;
+      case 'setInstrument':
+        return (state.meta.instruments[a.track] ?? '') === '' ? 0 : 1;
       case 'nudgeTempo':
         return Math.max(1, Math.ceil(Math.abs(a.delta) / 2));
       default:
-        return 1; // place, setInstrument
+        return 1; // place
     }
   };
   const cost = actions.reduce((sum, a) => sum + actionCost(a), 0);

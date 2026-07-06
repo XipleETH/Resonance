@@ -3,6 +3,12 @@ body {
   padding: 0;
   color: rgba(255, 255, 255, 0.87);
   background-color: #0f0f0f;
+  /* Canvas game: never let a tap/drag select page content or flash the mobile
+     tap-highlight (that's the "blue screen" on touch). */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 
 #app {
