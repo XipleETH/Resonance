@@ -168,7 +168,6 @@ export class Game extends Scene {
   private instruments: string[] = [];
   private bpm = 96;
   private myUserId = '';
-  private postId = ''; // this composition's id — seeds its per-post color theme
 
   private draftPlace = new Set<string>();
   private draftRemove = new Set<string>();
@@ -463,7 +462,6 @@ export class Game extends Scene {
       if (!res.ok) throw new Error(`init ${res.status}`);
       const data = (await res.json()) as JamInitResponse;
       this.myUserId = data.userId;
-      this.postId = data.postId;
       this.applyServerState(data.state);
       this.energy = data.energy;
       this.channel = data.channel;
@@ -825,7 +823,7 @@ export class Game extends Scene {
 
   /** Recolor the paper surfaces for this day (bg, panel, wave slider, slider button). */
   private applyTheme(): void {
-    this.theme = themeFor(this.postId || this.state.meta.day); // per-post colors ("cada composición")
+    this.theme = themeFor(this.state.meta.day); // per-DAY palette, frozen per post (meta.day is set at creation)
     this.cameras.main.setBackgroundColor(this.theme.bg);
     this.bg.setTint(this.theme.card);
     this.resetImg.setTint(this.theme.accent);
