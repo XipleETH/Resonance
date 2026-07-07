@@ -726,6 +726,9 @@ export class Game extends Scene {
       this.activate(); // safety: pointerdown normally already woke it
       return;
     }
+    // First interaction just woke + started audio (matters on desktop, where a mouse can't
+    // "swipe"): let it play INLINE and don't expand yet — the next click expands.
+    if (woke) return;
     try {
       sessionStorage.setItem(PENDING_KEY, JSON.stringify(this.hitTestIntent(gx, gy)));
     } catch {

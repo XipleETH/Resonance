@@ -11,7 +11,12 @@ import { AUTO, Game } from 'phaser';
 // buffer match device pixels (size = CSS px × DPR) and let FIT scale it to the viewport.
 // The scene lays out proportionally (u = width/410) so it looks identical, just sharp.
 const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
-const gameW = (): number => Math.round(window.innerWidth * dpr);
+// The whole layout is designed as a phone-like PORTRAIT column. On mobile the viewport is
+// already portrait so we use its full width; on a wide/desktop viewport we CAP the width to
+// a portrait column (≤ 60% of the height) so FIT centers it with side letterboxes instead of
+// stretching the portrait design across a landscape window.
+const MAX_PORTRAIT_ASPECT = 0.6; // max width : height
+const gameW = (): number => Math.round(Math.min(window.innerWidth, window.innerHeight * MAX_PORTRAIT_ASPECT) * dpr);
 const gameH = (): number => Math.round(window.innerHeight * dpr);
 
 const config: Phaser.Types.Core.GameConfig = {
