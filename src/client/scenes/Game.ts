@@ -40,12 +40,13 @@ import {
 
 const KRAFT = '#cdb083';
 const INK = 0x3a2f22;
+const WAVE_FILL = 0xe7d6ac; // wave bar fill — FIXED (not themed) to keep the app's personality
 const CRAYON = '"Gochi Hand", "Comic Sans MS", "Marker Felt", "Segoe Print", cursive';
 
-// Per-day palette so every composition looks different — but only the "paper" surfaces
-// (background, panel, wave slider, slider buttons) shift; note pads + main buttons keep
-// their fixed colors so the app stays recognizable. Soft/high-lightness so it reads crayon.
-type Theme = { bg: string; card: number; panel: number; waveFill: number; accent: number };
+// Per-day palette so every day looks different — but ONLY the "paper" surfaces (background
+// + panel) shift. The wave bar, reset button, fx chips, note pads and main buttons keep
+// fixed colors so the app keeps its personality. Soft/high-lightness so it reads crayon.
+type Theme = { bg: string; card: number; panel: number };
 function hslNum(h: number, s: number, l: number): number {
   const c = (1 - Math.abs(2 * l - 1)) * s;
   const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
@@ -63,14 +64,11 @@ function themeFor(day: string): Theme {
     h = Math.imul(h, 16777619);
   }
   const hue = (h >>> 0) % 360;
-  const hue2 = (hue + 150) % 360;
   const hex = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
   return {
     bg: hex(hslNum(hue, 0.3, 0.5)),
     card: hslNum(hue, 0.45, 0.82),
     panel: hslNum(hue, 0.36, 0.84),
-    waveFill: hslNum(hue2, 0.4, 0.82),
-    accent: hslNum(hue2, 0.55, 0.68),
   };
 }
 const key = (t: number, s: number): string => `${t}_${s}`;
@@ -826,8 +824,8 @@ export class Game extends Scene {
     this.theme = themeFor(this.state.meta.day); // per-DAY palette, frozen per post (meta.day is set at creation)
     this.cameras.main.setBackgroundColor(this.theme.bg);
     this.bg.setTint(this.theme.card);
-    this.resetImg.setTint(this.theme.accent);
-    this.layout(); // redraw panel + wave with the new palette
+    // NOTE: wave bar + reset button + fx chips keep FIXED colors (personality), not themed.
+    this.layout(); // redraw panel with the new palette
   }
 
   /** Fill the 24 menu slots from the day's pool of pickable sounds. */
@@ -1304,7 +1302,7 @@ export class Game extends Scene {
     const b = this.waveBox;
     const u = this.u;
     g.clear();
-    g.fillStyle(this.theme.waveFill, 0.6).fillRoundedRect(b.x, b.y, b.w, b.h, 10 * u);
+    g.fillStyle(WAVE_FILL, 0.6).fillRoundedRect(b.x, b.y, b.w, b.h, 10 * u);
     g.lineStyle(2 * u, INK, 0.5).strokeRoundedRect(b.x, b.y, b.w, b.h, 10 * u);
     const yc = b.y + b.h / 2;
     g.lineStyle(1.5 * u, INK, 0.25);
@@ -1385,8 +1383,8 @@ export class Game extends Scene {
     this.cameras.resize(W, H);
     this.bg.setSize(W, H);
 
-    const titleW = Math.min(232 * u, W * 0.62);
-    this.title.setPosition(14 * u, 10 * u).setDisplaySize(titleW, (titleW * 170) / 660);
+    const titleW = Math.min(168 * u, W * 0.46);
+    this.title.setPosition(8 * u, 6 * u).setDisplaySize(titleW, (titleW * 170) / 660);
     this.dayText.setPosition(16 * u, 60 * u).setFontSize(13 * u);
     this.sizePill(this.dayChip, this.dayText, 12 * u, 0, 0.5);
     this.dayChip.setPosition(14 * u, 60 * u);
