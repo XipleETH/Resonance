@@ -71,6 +71,9 @@ function themeFor(day: string): Theme {
     panel: hslNum(hue, 0.36, 0.84),
   };
 }
+// The server's day key is UTC YYYY-MM-DD (todayStr). Match it so the client can paint the
+// day's palette before the init fetch returns (avoids a flash of base colors on load).
+const clientDay = (): string => new Date().toISOString().slice(0, 10);
 const key = (t: number, s: number): string => `${t}_${s}`;
 const keyText: Record<string, string> = { C: 'DO', D: 'RE', E: 'MI', F: 'FA', G: 'SOL', A: 'LA', B: 'SI' };
 
@@ -194,7 +197,7 @@ export class Game extends Scene {
   };
 
   private bg!: Phaser.GameObjects.TileSprite;
-  private theme: Theme = themeFor('DÍA 1');
+  private theme: Theme = themeFor(clientDay()); // today's palette up-front → no color flash
   private panel!: Phaser.GameObjects.Graphics;
   private selRing!: Phaser.GameObjects.Graphics;
   private cells: Phaser.GameObjects.Image[][] = [];
@@ -273,8 +276,10 @@ export class Game extends Scene {
 
   create(): void {
     this.ensureTextures();
-    this.cameras.main.setBackgroundColor(KRAFT);
-    this.bg = this.add.tileSprite(0, 0, this.scale.width, this.scale.height, 'cb_card').setOrigin(0);
+    // Paint TODAY's palette immediately (no flash of base colors). The init fetch later
+    // confirms it via meta.day — same day → no change; an old post → corrects then.
+    this.cameras.main.setBackgroundColor(this.theme.bg);
+    this.bg = this.add.tileSprite(0, 0, this.scale.width, this.scale.height, 'cb_card').setOrigin(0).setTint(this.theme.card);
     // Full-surface catcher (behind everything): any tap on the post wakes it.
     this.bgZone = this.add.zone(0, 0, 10, 10).setOrigin(0).setInteractive();
     this.bgZone.on('pointerdown', () => this.gate());
