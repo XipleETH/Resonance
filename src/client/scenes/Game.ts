@@ -168,6 +168,7 @@ export class Game extends Scene {
   private instruments: string[] = [];
   private bpm = 96;
   private myUserId = '';
+  private postId = ''; // this composition's id — seeds its per-post color theme
 
   private draftPlace = new Set<string>();
   private draftRemove = new Set<string>();
@@ -205,7 +206,7 @@ export class Game extends Scene {
   private fichaDots: Phaser.GameObjects.Arc[] = [];
   private fxChips: Array<{ img: Phaser.GameObjects.Image; icon: Phaser.GameObjects.Image; txt: Phaser.GameObjects.Text; type: FxType }> = [];
   private playhead!: Phaser.GameObjects.Rectangle;
-  private title!: Phaser.GameObjects.Text;
+  private title!: Phaser.GameObjects.Image;
   private dayChip!: Phaser.GameObjects.Image;
   private dayText!: Phaser.GameObjects.Text;
   private presenceChip!: Phaser.GameObjects.Image;
@@ -283,7 +284,7 @@ export class Game extends Scene {
     this.panel = this.add.graphics();
     this.selRing = this.add.graphics();
 
-    this.title = this.add.text(0, 0, 'RESONANCE', { fontFamily: CRAYON, fontSize: '30px', color: '#e2574c' }).setAngle(-2);
+    this.title = this.add.image(0, 0, 'ic_title').setOrigin(0, 0); // wordmark: letters made of notes
     this.dayChip = this.add.image(0, 0, 'cb_pill').setTint(0xfbe7c2).setOrigin(0, 0.5);
     this.dayText = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '13px', color: '#8a6410' }).setOrigin(0, 0.5);
     this.presenceChip = this.add.image(0, 0, 'cb_pill').setTint(0xe7f6ea).setOrigin(1, 0.5);
@@ -462,6 +463,7 @@ export class Game extends Scene {
       if (!res.ok) throw new Error(`init ${res.status}`);
       const data = (await res.json()) as JamInitResponse;
       this.myUserId = data.userId;
+      this.postId = data.postId;
       this.applyServerState(data.state);
       this.energy = data.energy;
       this.channel = data.channel;
@@ -823,7 +825,7 @@ export class Game extends Scene {
 
   /** Recolor the paper surfaces for this day (bg, panel, wave slider, slider button). */
   private applyTheme(): void {
-    this.theme = themeFor(this.state.meta.day);
+    this.theme = themeFor(this.postId || this.state.meta.day); // per-post colors ("cada composición")
     this.cameras.main.setBackgroundColor(this.theme.bg);
     this.bg.setTint(this.theme.card);
     this.resetImg.setTint(this.theme.accent);
@@ -1385,7 +1387,8 @@ export class Game extends Scene {
     this.cameras.resize(W, H);
     this.bg.setSize(W, H);
 
-    this.title.setPosition(14 * u, 12 * u).setFontSize(30 * u);
+    const titleW = Math.min(232 * u, W * 0.62);
+    this.title.setPosition(14 * u, 10 * u).setDisplaySize(titleW, (titleW * 170) / 660);
     this.dayText.setPosition(16 * u, 60 * u).setFontSize(13 * u);
     this.sizePill(this.dayChip, this.dayText, 12 * u, 0, 0.5);
     this.dayChip.setPosition(14 * u, 60 * u);

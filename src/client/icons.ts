@@ -143,30 +143,36 @@ export const ICONS: Record<string, string> = {
   clock: wrap(`<circle cx="20" cy="20" r="13" fill="none" stroke-width="3"/><line x1="20" y1="20" x2="20" y2="12"/><line x1="20" y1="20" x2="26" y2="22"/>`),
 };
 
-/** Rasterize every icon into a Phaser texture `ic_<name>` (call from Boot). */
+// The "RESONANCE" title wordmark: each letter is built FROM musical notation (R/E = beamed
+// stems with note-head feet, S = treble clef, O = hollow half-note, N/A = stem+beam, C =
+// dotted bass clef). Wide aspect (660x170), rasterized separately from the square icons.
+export const TITLE_SVG = `<svg width="660" height="170" viewBox="0 0 660 170" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke="#3a2f22" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><g><line x1="30" y1="45" x2="30" y2="130"/><path d="M30 45 C 68 45, 74 82, 34 84" fill="#e2574c"/><path d="M34 84 C 60 84, 66 108, 74 130" fill="none"/><ellipse cx="26" cy="132" rx="15" ry="10.5" fill="#e2574c" transform="rotate(-20 26 132)"/><ellipse cx="78" cy="132" rx="15" ry="10.5" fill="#f2b705" transform="rotate(-20 78 132)"/></g><g><line x1="103" y1="45" x2="103" y2="128"/><line x1="103" y1="48" x2="150" y2="42" stroke-width="8" stroke="#e2574c"/><line x1="103" y1="86" x2="146" y2="82" stroke-width="7" stroke="#3a2f22"/><line x1="103" y1="124" x2="150" y2="120" stroke-width="8" stroke="#e2574c"/><ellipse cx="99" cy="130" rx="15" ry="10.5" fill="#e2574c" transform="rotate(-20 99 130)"/></g><g stroke-width="6"><path d="M204 52 C 214 40, 190 32, 178 40 C 166 48, 172 62, 188 66 C 204 70, 214 78, 208 92 C 200 108, 188 118, 180 126 C 176 130, 182 138, 192 134" fill="none" stroke="#e2574c"/><path d="M180 60 C 172 56, 172 46, 182 44" fill="none" stroke="#3a2f22" stroke-width="4"/><circle cx="203" cy="118" r="4.5" fill="#3a2f22" stroke="none"/></g><g><ellipse cx="272" cy="88" rx="30" ry="40" fill="#3fb0ac" stroke="#3a2f22" stroke-width="5"/><ellipse cx="272" cy="88" rx="13" ry="21" fill="none" stroke="#3a2f22" stroke-width="5"/><line x1="300" y1="86" x2="300" y2="40" stroke-width="5"/></g><g><line x1="338" y1="128" x2="338" y2="46"/><line x1="388" y1="128" x2="388" y2="46"/><line x1="336" y1="48" x2="390" y2="120" stroke-width="7" stroke="#e2574c"/><ellipse cx="334" cy="130" rx="14" ry="10" fill="#e2574c" transform="rotate(-20 334 130)"/><ellipse cx="392" cy="48" rx="14" ry="10" fill="#f2b705" transform="rotate(-20 392 48)"/></g><g><line x1="422" y1="128" x2="440" y2="46"/><line x1="478" y1="128" x2="460" y2="46"/><line x1="440" y1="60" x2="460" y2="60" stroke-width="7" stroke="#e2574c"/><ellipse cx="418" cy="130" rx="14" ry="10" fill="#e2574c" transform="rotate(-20 418 130)"/><ellipse cx="482" cy="130" rx="14" ry="10" fill="#6f42ab" transform="rotate(-20 482 130)"/></g><g><line x1="510" y1="128" x2="510" y2="46"/><line x1="560" y1="128" x2="560" y2="46"/><line x1="508" y1="48" x2="562" y2="120" stroke-width="7" stroke="#e2574c"/><ellipse cx="506" cy="130" rx="14" ry="10" fill="#e2574c" transform="rotate(-20 506 130)"/><ellipse cx="564" cy="48" rx="14" ry="10" fill="#ef8a3c" transform="rotate(-20 564 48)"/></g><g stroke-width="6"><path d="M636 58 C 626 44, 604 42, 594 52 C 578 66, 578 108, 596 124 C 608 134, 628 132, 638 120" fill="#e2574c" stroke="#3a2f22"/><circle cx="650" cy="74" r="5" fill="#3a2f22" stroke="none"/><circle cx="650" cy="102" r="5" fill="#3a2f22" stroke="none"/></g></g></svg>`;
+
+/** Rasterize one SVG string into a Phaser texture at the given pixel size. */
+function rasterize(scene: Phaser.Scene, key: string, svg: string, w: number, h: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (scene.textures.exists(key)) return resolve();
+    const img = new Image();
+    img.onload = (): void => {
+      const cv = document.createElement('canvas');
+      cv.width = w;
+      cv.height = h;
+      const ctx = cv.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, w, h);
+        if (!scene.textures.exists(key)) scene.textures.addCanvas(key, cv);
+      }
+      resolve();
+    };
+    img.onerror = (): void => resolve();
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+}
+
+/** Rasterize every icon (`ic_<name>`) + the title (`ic_title`) into textures (call from Boot). */
 export async function loadIcons(scene: Phaser.Scene): Promise<void> {
-  await Promise.all(
-    Object.entries(ICONS).map(
-      (entry) =>
-        new Promise<void>((resolve) => {
-          const [name, svg] = entry;
-          const key = `ic_${name}`;
-          if (scene.textures.exists(key)) return resolve();
-          const img = new Image();
-          img.onload = (): void => {
-            const cv = document.createElement('canvas');
-            cv.width = 128;
-            cv.height = 128;
-            const ctx = cv.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(img, 0, 0, 128, 128);
-              if (!scene.textures.exists(key)) scene.textures.addCanvas(key, cv);
-            }
-            resolve();
-          };
-          img.onerror = (): void => resolve();
-          img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-        })
-    )
-  );
+  await Promise.all([
+    ...Object.entries(ICONS).map(([name, svg]) => rasterize(scene, `ic_${name}`, svg, 128, 128)),
+    rasterize(scene, 'ic_title', TITLE_SVG, 660, 170),
+  ]);
 }
