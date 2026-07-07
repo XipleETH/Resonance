@@ -33,6 +33,8 @@ import {
   type JamDiff,
   type JamInitResponse,
   type JamState,
+  type ProfileResponse,
+  type RankingsResponse,
   type TrackFx,
 } from '../../shared/jam';
 
@@ -223,6 +225,12 @@ export class Game extends Scene {
   private saveImg!: Phaser.GameObjects.Image;
   private saveIcon!: Phaser.GameObjects.Image;
   private saveText!: Phaser.GameObjects.Text;
+  private rankImg!: Phaser.GameObjects.Image;
+  private rankIcon!: Phaser.GameObjects.Image;
+  private clockIcon!: Phaser.GameObjects.Image;
+  private dateText!: Phaser.GameObjects.Text;
+  private rankBtn: HTMLButtonElement | null = null;
+  private rankOverlay: HTMLDivElement | null = null;
   private fsImg!: Phaser.GameObjects.Image;
   private fsIcon!: Phaser.GameObjects.Image;
   private ppImg!: Phaser.GameObjects.Image;
@@ -316,7 +324,7 @@ export class Game extends Scene {
 
     for (let i = 0; i < MAX_FICHAS; i++) this.fichaDots.push(this.add.circle(0, 0, 8, 0x3fb0ac).setStrokeStyle(2.5, INK));
     this.fichaText = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '14px', color: '#4a3a22' }).setOrigin(0, 0.5);
-    this.fichaSub = this.add.text(0, 0, '↻ cada 12 h', { fontFamily: CRAYON, fontSize: '11px', color: '#a9691f' }).setOrigin(0, 0.5);
+    this.fichaSub = this.add.text(0, 0, '12h', { fontFamily: CRAYON, fontSize: '12px', color: '#a9691f' }).setOrigin(0, 0.5);
 
     this.exprLabel = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '12px', color: '#7a6a4a' });
     for (const tgt of FX_TARGETS) {
@@ -384,6 +392,10 @@ export class Game extends Scene {
       if (this.gate()) this.togglePlayPause();
     });
     this.ppIcon = this.add.image(0, 0, 'ic_play');
+    this.rankImg = this.add.image(0, 0, 'cb_pill').setTint(0xe8cf9a);
+    this.rankIcon = this.add.image(0, 0, 'ic_rank');
+    this.clockIcon = this.add.image(0, 0, 'ic_clock');
+    this.dateText = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '11px', color: '#6b5636' }).setOrigin(1, 0.5);
 
     this.footer = this.add.text(0, 0, 'nadie montó esto — lo hizo la comunidad', { fontFamily: CRAYON, fontSize: '11px', color: '#8a7a58' }).setOrigin(0.5);
     this.toastText = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '15px', color: '#ffd1d1' }).setOrigin(0.5).setAlpha(0);
@@ -589,6 +601,108 @@ export class Game extends Scene {
       this.wokeByPointer = !this.active;
       if (this.wokeByPointer) this.activate();
     });
+    // Ranking button (DOM so it clicks reliably inline or expanded), sits over the rank pill.
+    this.rankBtn = make();
+    this.rankBtn.addEventListener('click', () => void this.openRanking());
+    this.setupRankingOverlay();
+  }
+
+  /** Build the ranking/profile modal once (DOM — avatars, lists, crayon styling). */
+  private setupRankingOverlay(): void {
+    if (this.rankOverlay) return;
+    const ov = document.createElement('div');
+    ov.id = 'rk-ov';
+    ov.style.display = 'none';
+    ov.innerHTML = `
+      <style>
+        #rk-ov{position:fixed;inset:0;z-index:20;background:rgba(32,26,18,.55);
+          font-family:'Gochi Hand','Comic Sans MS',cursive;overflow:auto;
+          -webkit-tap-highlight-color:transparent}
+        #rk-ov .rk-card{max-width:520px;margin:5vh auto;background:#e7d6ac;border:3px solid #3a2f22;
+          border-radius:18px;padding:14px 16px 20px;color:#3a2f22}
+        #rk-ov .rk-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+        #rk-ov .rk-title{font-size:26px;color:#e2574c;transform:rotate(-2deg)}
+        #rk-ov .rk-x{font-size:22px;background:#f1b0a0;border:2px solid #3a2f22;border-radius:50%;
+          width:34px;height:34px;line-height:30px;text-align:center;cursor:pointer}
+        #rk-ov .rk-me{display:flex;align-items:center;gap:10px;background:#f1e3bf;border:2px solid #3a2f22;
+          border-radius:14px;padding:8px 10px;margin-bottom:10px}
+        #rk-ov .rk-me .rk-stats{font-size:15px;line-height:1.35}
+        #rk-ov .rk-most{font-size:15px;margin:2px 2px 10px;color:#6b5636}
+        #rk-ov .rk-sec{font-size:17px;color:#4a3a22;margin:10px 2px 4px}
+        #rk-ov .rk-row{display:flex;align-items:center;gap:9px;padding:4px 6px;border-bottom:1.5px dashed #c9b487;font-size:16px}
+        #rk-ov .rk-rn{width:20px;text-align:center;color:#8a7a58}
+        #rk-ov .rk-nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        #rk-ov .rk-vl{font-weight:bold;color:#e2574c}
+        #rk-ov .rk-avw{position:relative;width:30px;height:30px;flex:0 0 30px}
+        #rk-ov .rk-av,#rk-ov .rk-fb{position:absolute;inset:0;width:30px;height:30px;border-radius:50%;
+          border:2px solid #3a2f22;box-sizing:border-box}
+        #rk-ov .rk-fb{display:flex;align-items:center;justify-content:center;color:#fff9ec;font-size:15px}
+        #rk-ov .rk-me .rk-avw{width:52px;height:52px;flex:0 0 52px}
+        #rk-ov .rk-me .rk-av,#rk-ov .rk-me .rk-fb{width:52px;height:52px;font-size:22px}
+      </style>
+      <div class="rk-card">
+        <div class="rk-top"><span class="rk-title">RANKING</span><div class="rk-x" id="rk-close">✕</div></div>
+        <div id="rk-body">cargando…</div>
+      </div>`;
+    document.body.appendChild(ov);
+    this.rankOverlay = ov;
+    const close = (): void => { ov.style.display = 'none'; };
+    ov.querySelector('#rk-close')?.addEventListener('click', close);
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); }); // click backdrop to close
+  }
+
+  private async openRanking(): Promise<void> {
+    const ov = this.rankOverlay;
+    if (!ov) return;
+    ov.style.display = 'block';
+    const body = ov.querySelector('#rk-body');
+    if (body) body.textContent = 'cargando…';
+    try {
+      const [rk, pf] = await Promise.all([
+        fetch('/api/jam/rankings').then((r) => r.json() as Promise<RankingsResponse>),
+        fetch('/api/jam/profile').then((r) => r.json() as Promise<ProfileResponse>),
+      ]);
+      if (body) body.innerHTML = this.rankingHtml(rk, pf);
+    } catch {
+      if (body) body.textContent = 'no se pudo cargar el ranking';
+    }
+  }
+
+  private rankingHtml(rk: RankingsResponse, pf: ProfileResponse): string {
+    const esc = (s: string): string => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch] ?? ch);
+    const avColors = ['#e2574c', '#3fb0ac', '#f2b705', '#9b6bd0', '#5bb974', '#4a7fd0'];
+    const avatar = (name: string, url: string, big = false): string => {
+      const init = esc((name[0] ?? '?').toUpperCase());
+      let h = 0;
+      for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+      const col = avColors[h % avColors.length];
+      const img = url ? `<img class="rk-av" src="${esc(url)}" alt="" onerror="this.style.display='none'">` : '';
+      return `<span class="rk-avw${big ? ' rk-me' : ''}"><span class="rk-fb" style="background:${col}">${init}</span>${img}</span>`;
+    };
+    const list = (title: string, rows: RankingsResponse['placed'], unit: string): string => {
+      if (!rows.length) return `<div class="rk-sec">${title}</div><div class="rk-most">aún nadie 🙂</div>`;
+      const items = rows
+        .slice(0, 5)
+        .map((e, i) => `<div class="rk-row"><span class="rk-rn">${i + 1}</span>${avatar(e.username, e.avatar)}<span class="rk-nm">${esc(e.username)}</span><span class="rk-vl">${e.value} ${unit}</span></div>`)
+        .join('');
+      return `<div class="rk-sec">${title}</div>${items}`;
+    };
+    const favLabel = pf.favInstrument ? (instrumentById(pf.favInstrument)?.label ?? pf.favInstrument) : '—';
+    const topLabel = rk.topInstrument ? (instrumentById(rk.topInstrument.id)?.label ?? rk.topInstrument.id) : '—';
+    const me = `
+      <div class="rk-me">
+        ${avatar(pf.username, pf.avatar, true)}
+        <div class="rk-stats"><b>${esc(pf.username)}</b><br>
+        ${pf.placed} puestos · ${pf.removed} quitados<br>
+        racha ${pf.streak} (mejor ${pf.best}) · fav: ${esc(favLabel)}</div>
+      </div>`;
+    return (
+      me +
+      `<div class="rk-most">🎛 sonido más usado por todos: <b>${esc(topLabel)}</b></div>` +
+      list('más beats puestos', rk.placed, '') +
+      list('más beats quitados', rk.removed, '') +
+      list('racha más larga', rk.streak, 'días')
+    );
   }
 
   private onInlineTap(ev: MouseEvent): void {
@@ -689,6 +803,8 @@ export class Game extends Scene {
     };
     const fb = this.fsImg.getBounds();
     put(this.fsBtn, fb.x, fb.y, fb.width, fb.height, !this.instrMenuOpen);
+    const rb = this.rankImg.getBounds();
+    put(this.rankBtn, rb.x, rb.y, rb.width, rb.height, !this.instrMenuOpen);
     // Inline: the catcher covers the whole canvas so any tap can expand. Expanded: hidden,
     // so the canvas is interacted with directly (wave drag, etc.).
     put(this.inlineCatcher, 0, 0, this.scale.width, this.scale.height, this.webMode() !== 'expanded' && !this.instrMenuOpen);
@@ -1163,7 +1279,8 @@ export class Game extends Scene {
 
   private renderHeader(): void {
     const m = this.state.meta;
-    this.dayText.setText(`${m.day} · clave ${keyText[m.key] ?? m.key} menor`);
+    this.dayText.setText(`clave de ${keyText[m.key] ?? m.key} menor`); // top-left
+    this.dateText.setText(m.day); // below the board, right
     this.presenceText.setText(`${Math.max(1, this.presence)} tocando en vivo`);
     this.layoutBpm();
   }
@@ -1276,10 +1393,7 @@ export class Game extends Scene {
     const fsCx = W - 8 * u - fsSz / 2;
     this.fsImg.setPosition(fsCx, 24 * u).setDisplaySize(fsSz, 32 * u);
     this.fsIcon.setPosition(fsCx, 24 * u).setDisplaySize(24 * u, 24 * u);
-    const ppCx = fsCx - fsSz - 6 * u;
-    this.ppImg.setPosition(ppCx, 24 * u).setDisplaySize(fsSz, 32 * u);
-    this.ppIcon.setPosition(ppCx, 24 * u).setDisplaySize(22 * u, 22 * u);
-    const presRight = ppCx - fsSz / 2 - 8 * u;
+    const presRight = fsCx - fsSz / 2 - 8 * u;
     this.presenceText.setPosition(presRight, 24 * u).setFontSize(13 * u);
     this.sizePill(this.presenceChip, this.presenceText, 12 * u, 1, 0.5);
     this.presenceChip.setPosition(presRight + 4 * u, 24 * u);
@@ -1316,6 +1430,7 @@ export class Game extends Scene {
     const chipH = 28 * u;
     const exprTop = top + gridH + 30 * u;
     this.exprLabel.setPosition(14 * u, exprTop).setFontSize(12 * u);
+    this.dateText.setPosition(W - 12 * u, top + gridH + 16 * u).setFontSize(11 * u);
     const fxY = exprTop + 22 * u + chipH / 2;
     const chipW = (W - 28 * u - 12 * u) / 3;
     for (let i = 0; i < this.fxChips.length; i++) {
@@ -1337,20 +1452,30 @@ export class Game extends Scene {
     this.resetImg.setPosition(rx, ry).setDisplaySize(rBtn, this.waveBox.h);
     this.resetText.setPosition(rx, ry).setFontSize(20 * u);
 
-    // bottom: fichas (left) + GUARDAR (right)
+    // bottom bar: fichas + 12h clock (left); play/pause, ranking, save (right)
     const by = H - 40 * u;
-    const dotGap = 22 * u;
-    for (let i = 0; i < this.fichaDots.length; i++) this.fichaDots[i]?.setPosition(16 * u + i * dotGap, by).setScale(u);
-    this.fichaText.setPosition(16 * u + MAX_FICHAS * dotGap + 4 * u, by).setFontSize(14 * u);
-    this.fichaSub.setPosition(this.fichaText.x + this.fichaText.width + 10 * u, by).setFontSize(11 * u);
+    const dotGap = 18 * u;
+    for (let i = 0; i < this.fichaDots.length; i++) this.fichaDots[i]?.setPosition(14 * u + i * dotGap, by).setScale(u * 0.9);
+    this.fichaText.setPosition(14 * u + MAX_FICHAS * dotGap + 2 * u, by).setFontSize(13 * u);
+    const clkX = this.fichaText.x + this.fichaText.width + 12 * u;
+    this.clockIcon.setPosition(clkX, by).setDisplaySize(16 * u, 16 * u);
+    this.fichaSub.setPosition(clkX + 11 * u, by).setFontSize(12 * u);
 
-    const saveW = Math.min(180 * u, W * 0.42);
-    const saveCx = W - 12 * u - saveW / 2;
-    this.saveImg.setPosition(saveCx, by).setDisplaySize(saveW, 42 * u);
-    this.saveIcon.setPosition(saveCx - saveW / 2 + 20 * u, by).setDisplaySize(26 * u, 26 * u);
-    this.saveText.setPosition(saveCx + 12 * u, by).setFontSize(16 * u);
+    const pillH = 34 * u;
+    const sq = 38 * u;
+    const saveW = 116 * u;
+    const saveCx = W - 10 * u - saveW / 2;
+    this.saveImg.setPosition(saveCx, by).setDisplaySize(saveW, pillH);
+    this.saveIcon.setPosition(saveCx - saveW / 2 + 17 * u, by).setDisplaySize(22 * u, 22 * u);
+    this.saveText.setPosition(saveCx + 11 * u, by).setFontSize(13 * u);
+    const rankCx = saveCx - saveW / 2 - 6 * u - sq / 2;
+    this.rankImg.setPosition(rankCx, by).setDisplaySize(sq, pillH);
+    this.rankIcon.setPosition(rankCx, by).setDisplaySize(24 * u, 24 * u);
+    const ppBx = rankCx - sq / 2 - 6 * u - sq / 2;
+    this.ppImg.setPosition(ppBx, by).setDisplaySize(sq, pillH);
+    this.ppIcon.setPosition(ppBx, by).setDisplaySize(20 * u, 20 * u);
 
-    this.footer.setPosition(W / 2, H - 12 * u).setFontSize(11 * u);
+    this.footer.setPosition(W / 2, H - 12 * u).setFontSize(10 * u);
     this.toastText.setPosition(W / 2, top + gridH * 0.4).setFontSize(15 * u);
 
     if (this.instrMenuOpen) this.layoutMenu();
@@ -1367,6 +1492,10 @@ export class Game extends Scene {
     this.fsBtn = null;
     this.inlineCatcher?.remove();
     this.inlineCatcher = null;
+    this.rankBtn?.remove();
+    this.rankBtn = null;
+    this.rankOverlay?.remove();
+    this.rankOverlay = null;
     this.game.canvas.removeEventListener('pointerdown', this.unlockAudio);
     window.removeEventListener('scroll', this.syncOnScroll);
     window.removeEventListener('resize', this.syncOnScroll);

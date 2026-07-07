@@ -139,6 +139,8 @@ export const ICONS: Record<string, string> = {
   exit: wrap(`<path d="M9 9 L16 16 M16 11 L16 16 L11 16 M31 31 L24 24 M24 29 L24 24 L29 24" fill="none" stroke-width="2.6"/>`),
   add: wrap(`<line x1="20" y1="10" x2="20" y2="30" stroke-width="3.2"/><line x1="10" y1="20" x2="30" y2="20" stroke-width="3.2"/>`),
   save: wrap(`<rect x="7" y="7" width="26" height="26" rx="3" fill="#3fb0ac"/><rect x="12" y="7" width="12" height="9" fill="${PAPER}"/><rect x="19" y="9" width="3" height="6" fill="${INK}" stroke="none"/><rect x="12" y="21" width="16" height="8" rx="1" fill="${PAPER}"/><line x1="15" y1="24" x2="25" y2="24"/><line x1="15" y1="27" x2="25" y2="27"/>`),
+  rank: wrap(`<path d="M13 8 L27 8 L27 14 Q27 20 20 21 Q13 20 13 14 Z" fill="#f2b705"/><path d="M13 10 Q7 10 8 16 Q9 19 13 18" fill="none"/><path d="M27 10 Q33 10 32 16 Q31 19 27 18" fill="none"/><line x1="20" y1="21" x2="20" y2="27"/><rect x="14" y="27" width="12" height="4" rx="1" fill="#f2b705"/><rect x="11" y="31" width="18" height="4" rx="1" fill="#f2b705"/>`),
+  clock: wrap(`<circle cx="20" cy="20" r="13" fill="none" stroke-width="3"/><line x1="20" y1="20" x2="20" y2="12"/><line x1="20" y1="20" x2="26" y2="22"/>`),
 };
 
 /** Rasterize every icon into a Phaser texture `ic_<name>` (call from Boot). */

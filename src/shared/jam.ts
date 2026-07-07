@@ -207,6 +207,28 @@ export function instrumentsInCategory(cat: InstrumentCategory): Instrument[] {
 }
 
 // ---------------------------------------------------------------------------
+// Player stats / rankings (Redis-backed, subreddit-wide, all-time)
+// ---------------------------------------------------------------------------
+export type RankEntry = { userId: string; username: string; avatar: string; value: number };
+export type RankingsResponse = {
+  placed: RankEntry[]; // most beats placed
+  removed: RankEntry[]; // most beats removed
+  streak: RankEntry[]; // longest current daily streak
+  topInstrument: { id: string; count: number } | null; // community's most-used sound
+};
+export type ProfileResponse = {
+  userId: string;
+  username: string;
+  avatar: string; // snoovatar URL ('' if none)
+  placed: number;
+  removed: number;
+  commits: number;
+  streak: number; // current daily streak
+  best: number; // best streak ever
+  favInstrument: string; // this player's most-placed instrument id ('' if none)
+};
+
+// ---------------------------------------------------------------------------
 // Expression wave (per-track LFO effect) — the draggable "wave" the user shapes.
 // depth 0 = flat/off. rate = how stretched/compressed the wave is (LFO speed).
 // ---------------------------------------------------------------------------

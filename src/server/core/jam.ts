@@ -16,6 +16,7 @@ import {
   type JamState,
   type TrackFx,
 } from '../../shared/jam';
+import { recordCommit } from './stats';
 
 const PRESENCE_TTL_MS = 30_000;
 
@@ -192,6 +193,13 @@ export async function commit(
   let version = state.meta.version;
   let bpm = state.meta.bpm;
 
+  // Effective instrument per track (committed + any setInstrument in this same batch) so a
+  // placed beat is attributed to the right sound for the "favorite instrument" stat.
+  const effInst = [...state.meta.instruments];
+  for (const a of actions) if (a.kind === 'setInstrument' && a.track >= 0 && a.track < effInst.length) effInst[a.track] = a.instrument;
+  const placedInstr: string[] = [];
+  let removedN = 0;
+
   for (const a of actions) {
     version = await redis.hIncrBy(metaKey(postId), 'version', 1);
 
@@ -199,10 +207,12 @@ export async function commit(
       if (!validCell(a.track, a.step, state.meta)) continue;
       await redis.hSet(gk, { [`${a.track}_${a.step}`]: cellVal(userId, a.fx) });
       await realtime.send<JamDiff>(channel, { kind: 'place', track: a.track, step: a.step, by: userId, fx: a.fx, version });
+      placedInstr.push(effInst[a.track] ?? '');
     } else if (a.kind === 'remove') {
       if (!validCell(a.track, a.step, state.meta)) continue;
       await redis.hDel(gk, [`${a.track}_${a.step}`]);
       await realtime.send<JamDiff>(channel, { kind: 'remove', track: a.track, step: a.step, version });
+      removedN++;
     } else if (a.kind === 'setCellFx') {
       const k = `${a.track}_${a.step}`;
       if (!validCell(a.track, a.step, state.meta) || !ownerOf.has(k)) continue;
@@ -226,6 +236,13 @@ export async function commit(
     fichas: String(remaining),
     period: String(currentPeriod(Date.now())),
   });
+
+  // Player stats for rankings/profiles — never let a stats failure break the commit.
+  try {
+    if (placedInstr.length > 0 || removedN > 0) await recordCommit(userId, placedInstr, removedN, Date.now());
+  } catch (e) {
+    console.error('recordCommit failed:', e);
+  }
 
   return { ok: true, energy: remaining, version };
 }

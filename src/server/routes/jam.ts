@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { context, reddit } from '@devvit/web/server';
 import { channelFor, commit, getEnergy, getState, heartbeat } from '../core/jam';
-import type { JamAction, JamCommitResponse, JamInitResponse } from '../../shared/jam';
+import { getProfile, getRankings, upsertUser } from '../core/stats';
+import type { JamAction, JamCommitResponse, JamInitResponse, ProfileResponse, RankingsResponse } from '../../shared/jam';
 
 const MAX_BATCH = 8;
 
@@ -13,6 +14,16 @@ jam.get('/init', async (c) => {
 
   const [state, username] = await Promise.all([getState(postId), reddit.getCurrentUsername()]);
   const energy = userId ? await getEnergy(postId, userId) : 0;
+
+  // Remember this player's Reddit name + avatar for rankings/profiles (best-effort).
+  if (userId && username) {
+    try {
+      const avatar = await reddit.getSnoovatarUrl(username);
+      await upsertUser(userId, username, avatar ?? '');
+    } catch (e) {
+      console.error('upsertUser failed:', e);
+    }
+  }
 
   const res: JamInitResponse = {
     type: 'jamInit',
@@ -55,4 +66,15 @@ jam.post('/heartbeat', async (c) => {
   if (!postId || !userId) return c.json({ count: 0 });
   const count = await heartbeat(postId, userId);
   return c.json({ count });
+});
+
+jam.get('/rankings', async (c) => {
+  return c.json<RankingsResponse>(await getRankings());
+});
+
+jam.get('/profile', async (c) => {
+  const { userId } = context;
+  const empty: ProfileResponse = { userId: '', username: 'anónimo', avatar: '', placed: 0, removed: 0, commits: 0, streak: 0, best: 0, favInstrument: '' };
+  if (!userId) return c.json<ProfileResponse>(empty);
+  return c.json<ProfileResponse>(await getProfile(userId));
 });
