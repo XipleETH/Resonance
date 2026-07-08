@@ -248,6 +248,10 @@ export class Game extends Scene {
 
   private curStep = 0;
   private u = 1;
+  // Height-aware scale. `u` alone (= W/410) blows up vertically on a wide-but-short
+  // inline frame (the desktop feed card), so sizes + vertical rhythm use `s` instead.
+  // On a tall/portrait frame (mobile, fullscreen) s ≈ u, so that layout is unchanged.
+  private s = 1;
   private gridBox = { left: 0, top: 0, cellW: 10, rowH: 10 };
   private waveBox = { x: 0, y: 0, w: 10, h: 10 };
   private waveDrag: { sx: number; sy: number; d0: number; r0: number; cell: string } | null = null;
@@ -548,6 +552,13 @@ export class Game extends Scene {
   }
 
   private webMode(): string {
+    // Dev-only override so the expanded layout can be previewed outside Devvit.
+    try {
+      const q = new URLSearchParams(location.search).get('mode');
+      if (q === 'expanded' || q === 'inline') return q;
+    } catch {
+      /* no location */
+    }
     try {
       return getWebViewMode();
     } catch {
@@ -1185,20 +1196,21 @@ export class Game extends Scene {
     const W = this.scale.width;
     const H = this.scale.height;
     const u = this.u;
+    const s = this.s;
     this.menuDim.setPosition(W / 2, H / 2).setSize(W, H);
     this.menuBackdrop.setPosition(W / 2, H / 2).setSize(W, H);
     const cols = 3;
     const rows = Math.ceil(this.menuChips.length / cols);
     const px = 22 * u;
     const pw = W - 44 * u;
-    const chH = 36 * u;
-    const ph = 56 * u + rows * (chH + 8 * u);
+    const chH = 36 * s;
+    const ph = 56 * s + rows * (chH + 8 * s);
     const py = (H - ph) / 2;
     this.menuPanel.clear();
-    this.menuPanel.fillStyle(0xf1e3bf, 0.98).fillRoundedRect(px, py, pw, ph, 18 * u);
-    this.menuPanel.lineStyle(3 * u, INK, 0.85).strokeRoundedRect(px, py, pw, ph, 18 * u);
+    this.menuPanel.fillStyle(0xf1e3bf, 0.98).fillRoundedRect(px, py, pw, ph, 18 * s);
+    this.menuPanel.lineStyle(3 * s, INK, 0.85).strokeRoundedRect(px, py, pw, ph, 18 * s);
     const sel = this.selectedTrack;
-    this.menuTitle.setText(sel >= 0 ? `sonido para la fila ${sel + 1}` : 'elige un sonido').setPosition(W / 2, py + 24 * u).setFontSize(14 * u);
+    this.menuTitle.setText(sel >= 0 ? `sonido para la fila ${sel + 1}` : 'elige un sonido').setPosition(W / 2, py + 24 * s).setFontSize(14 * s);
     const cw = (pw - 24 * u) / cols;
     const curId = sel >= 0 ? this.effInstrument(sel) : '';
     for (let i = 0; i < this.menuChips.length; i++) {
@@ -1209,13 +1221,13 @@ export class Game extends Scene {
       const col = i % cols;
       const rowi = Math.floor(i / cols);
       const cx = px + 12 * u + col * cw + cw / 2;
-      const cy = py + 48 * u + rowi * (chH + 8 * u) + chH / 2;
+      const cy = py + 48 * s + rowi * (chH + 8 * s) + chH / 2;
       const innerW = cw - 8 * u;
       m.img.setPosition(cx, cy).setDisplaySize(innerW, chH);
       const mIcSz = chH * 0.66;
       const mLeft = cx - innerW / 2 + 7 * u;
       m.icon.setPosition(mLeft + mIcSz / 2, cy).setDisplaySize(mIcSz, mIcSz);
-      m.txt.setPosition(mLeft + mIcSz + 4 * u, cy).setFontSize(11 * u);
+      m.txt.setPosition(mLeft + mIcSz + 4 * u, cy).setFontSize(11 * s);
     }
   }
 
@@ -1372,15 +1384,16 @@ export class Game extends Scene {
   private layoutBpm(): void {
     const W = this.scale.width;
     const u = this.u;
-    this.bpmText.setText(`${this.bpm + this.draftTempo} BPM`).setFontSize(15 * u).setOrigin(0.5);
+    const s = this.s;
+    this.bpmText.setText(`${this.bpm + this.draftTempo} BPM`).setFontSize(15 * s).setOrigin(0.5);
     const cx = W - 84 * u;
-    const y = 56 * u;
+    const y = 56 * s;
     this.bpmText.setPosition(cx, y);
     const half = this.bpmText.width / 2;
-    this.tempoDown.setPosition(cx - half - 20 * u, y).setDisplaySize(34 * u, 30 * u);
-    this.tempoDownT.setPosition(cx - half - 20 * u, y).setFontSize(22 * u);
-    this.tempoUp.setPosition(cx + half + 20 * u, y).setDisplaySize(34 * u, 30 * u);
-    this.tempoUpT.setPosition(cx + half + 20 * u, y).setFontSize(22 * u);
+    this.tempoDown.setPosition(cx - half - 20 * s, y).setDisplaySize(34 * s, 30 * s);
+    this.tempoDownT.setPosition(cx - half - 20 * s, y).setFontSize(22 * s);
+    this.tempoUp.setPosition(cx + half + 20 * s, y).setDisplaySize(34 * s, 30 * s);
+    this.tempoUpT.setPosition(cx + half + 20 * s, y).setFontSize(22 * s);
   }
 
   private layout(): void {
@@ -1388,102 +1401,121 @@ export class Game extends Scene {
     const H = this.scale.height;
     const u = W / 410;
     this.u = u;
+    // Height-aware scale: on a wide-but-short inline frame (desktop feed card) plain `u`
+    // overflows vertically; `s` caps growth to the available height. Portrait ≈ u.
+    const s = Math.min(u, H / 730);
+    this.s = s;
+    // Inline (in the feed) = compact preview: no FX chips, taller pads, controls low.
+    // Expanded (fullscreen, any device) = the complete studio, like the Android app.
+    const compact = this.webMode() !== 'expanded';
     this.cameras.resize(W, H);
     this.bg.setSize(W, H);
 
-    const titleW = Math.min(168 * u, W * 0.46);
-    this.title.setPosition(8 * u, 6 * u).setDisplaySize(titleW, (titleW * 170) / 660);
-    this.dayText.setPosition(16 * u, 60 * u).setFontSize(13 * u);
-    this.sizePill(this.dayChip, this.dayText, 12 * u, 0, 0.5);
-    this.dayChip.setPosition(14 * u, 60 * u);
-    const fsSz = 40 * u;
+    // ---- top band ----
+    const titleW = Math.min(168 * s, W * 0.46);
+    this.title.setPosition(8 * u, 6 * s).setDisplaySize(titleW, (titleW * 170) / 660);
+    this.dayText.setPosition(16 * u, 60 * s).setFontSize(13 * s);
+    this.sizePill(this.dayChip, this.dayText, 12 * s, 0, 0.5);
+    this.dayChip.setPosition(14 * u, 60 * s);
+    const fsSz = 40 * s;
     const fsCx = W - 8 * u - fsSz / 2;
-    this.fsImg.setPosition(fsCx, 24 * u).setDisplaySize(fsSz, 32 * u);
-    this.fsIcon.setPosition(fsCx, 24 * u).setDisplaySize(24 * u, 24 * u);
+    this.fsImg.setPosition(fsCx, 24 * s).setDisplaySize(fsSz, 32 * s);
+    this.fsIcon.setPosition(fsCx, 24 * s).setDisplaySize(24 * s, 24 * s);
     const presRight = fsCx - fsSz / 2 - 8 * u;
-    this.presenceText.setPosition(presRight, 24 * u).setFontSize(13 * u);
-    this.sizePill(this.presenceChip, this.presenceText, 12 * u, 1, 0.5);
-    this.presenceChip.setPosition(presRight + 4 * u, 24 * u);
+    this.presenceText.setPosition(presRight, 24 * s).setFontSize(13 * s);
+    this.sizePill(this.presenceChip, this.presenceText, 12 * s, 1, 0.5);
+    this.presenceChip.setPosition(presRight + 4 * u, 24 * s);
     this.layoutBpm();
     this.bgZone.setPosition(0, 0).setSize(W, H);
 
-    const labelW = Phaser.Math.Clamp(W * 0.22, 70 * u, 130 * u);
+    // ---- bottom controls are anchored to the bottom edge; the grid then FILLS the
+    // space above them, so there's never an empty gap regardless of frame height
+    // (tall fullscreen or short feed card). ----
+    const by = H - 40 * s; // fichas / play / rank / save row (center y)
+    const pillH = 34 * s;
+    const chipH = 28 * s;
+    const waveH = 52 * s;
+    const rBtn = 40 * s;
+    const waveBottom = by - pillH / 2 - 12 * s;
+    const waveTop = waveBottom - waveH;
+    const fxY = waveTop - 10 * s - chipH / 2; // FX row centre (expanded only)
+    const exprTop = (compact ? waveTop : fxY - chipH / 2) - 16 * s; // label above the block
+
+    // ---- grid: fills from the top band down to just above the expression block ----
+    const labelW = Phaser.Math.Clamp(W * 0.22, 70 * s, 130 * s);
     const left = labelW + 6 * u;
-    const top = 92 * u;
-    const gridH = H * 0.4;
+    const top = 88 * s;
+    const gridH = Math.max(exprTop - 16 * s - top, 120 * s);
     const cellW = (W - 10 * u - left) / STEPS;
     const rowH = gridH / TRACKS;
     this.gridBox = { left, top, cellW, rowH };
 
     this.panel.clear();
-    this.panel.fillStyle(this.theme.panel, 0.55).fillRoundedRect(8 * u, top - 12 * u, W - 16 * u, gridH + 24 * u, 16 * u);
-    this.panel.lineStyle(3 * u, INK, 0.7).strokeRoundedRect(8 * u, top - 12 * u, W - 16 * u, gridH + 24 * u, 16 * u);
+    this.panel.fillStyle(this.theme.panel, 0.55).fillRoundedRect(8 * u, top - 12 * s, W - 16 * u, gridH + 24 * s, 16 * s);
+    this.panel.lineStyle(3 * s, INK, 0.7).strokeRoundedRect(8 * u, top - 12 * s, W - 16 * u, gridH + 24 * s, 16 * s);
 
     for (let t = 0; t < TRACKS; t++) {
-      for (let s = 0; s < STEPS; s++) {
-        this.cells[t]?.[s]
-          ?.setPosition(left + s * cellW + cellW / 2, top + t * rowH + rowH / 2)
-          .setDisplaySize(cellW - 3 * u, rowH - 6 * u);
+      for (let sc = 0; sc < STEPS; sc++) {
+        this.cells[t]?.[sc]
+          ?.setPosition(left + sc * cellW + cellW / 2, top + t * rowH + rowH / 2)
+          .setDisplaySize(cellW - 3 * u, rowH - 6 * s);
       }
       const rowCy = top + t * rowH + rowH / 2;
-      const licSz = Math.min(rowH * 0.72, 20 * u);
+      const licSz = Math.min(rowH * 0.72, 20 * s);
       this.labelIcons[t]?.setPosition(10 * u + licSz / 2, rowCy).setDisplaySize(licSz, licSz);
-      this.labels[t]?.setPosition(10 * u + licSz + 4 * u, rowCy).setFontSize(Math.min(12 * u, rowH * 0.4));
+      this.labels[t]?.setPosition(10 * u + licSz + 4 * u, rowCy).setFontSize(Math.min(12 * s, rowH * 0.4));
     }
     this.playhead.setSize(cellW, rowH * TRACKS);
     this.onStepVisual(this.curStep);
 
-    // expression (per-beat wave)
-    const chipH = 28 * u;
-    const exprTop = top + gridH + 30 * u;
-    this.exprLabel.setPosition(14 * u, exprTop).setFontSize(12 * u);
-    this.dateText.setPosition(W - 12 * u, top + gridH + 16 * u).setFontSize(11 * u);
-    const fxY = exprTop + 22 * u + chipH / 2;
+    // ---- expression: label + FX chips (expanded only) + wave bar ----
+    this.exprLabel.setPosition(14 * u, exprTop).setFontSize(12 * s);
+    this.dateText.setPosition(W - 12 * u, top + gridH + 14 * s).setFontSize(11 * s);
     const chipW = (W - 28 * u - 12 * u) / 3;
     for (let i = 0; i < this.fxChips.length; i++) {
       const c = this.fxChips[i];
       if (!c) continue;
+      c.img.setVisible(!compact);
+      c.icon.setVisible(!compact);
+      c.txt.setVisible(!compact);
       const cx = 14 * u + (i % 3) * (chipW + 6 * u) + chipW / 2;
       c.img.setPosition(cx, fxY).setDisplaySize(chipW, chipH);
       const fxIcSz = chipH * 0.72;
       const fxLeft = cx - chipW / 2 + 8 * u;
       c.icon.setPosition(fxLeft + fxIcSz / 2, fxY).setDisplaySize(fxIcSz, fxIcSz);
-      c.txt.setPosition(fxLeft + fxIcSz + 4 * u, fxY).setFontSize(11 * u);
+      c.txt.setPosition(fxLeft + fxIcSz + 4 * u, fxY).setFontSize(11 * s);
     }
     // wave bar + reset button beside it
-    const rBtn = 40 * u;
-    this.waveBox = { x: 14 * u, y: fxY + chipH / 2 + 8 * u, w: W - 28 * u - rBtn - 8 * u, h: 52 * u };
+    this.waveBox = { x: 14 * u, y: waveTop, w: W - 28 * u - rBtn - 8 * u, h: waveH };
     this.waveZone.setPosition(this.waveBox.x + this.waveBox.w / 2, this.waveBox.y + this.waveBox.h / 2).setSize(this.waveBox.w, this.waveBox.h);
     const rx = this.waveBox.x + this.waveBox.w + 8 * u + rBtn / 2;
     const ry = this.waveBox.y + this.waveBox.h / 2;
     this.resetImg.setPosition(rx, ry).setDisplaySize(rBtn, this.waveBox.h);
-    this.resetText.setPosition(rx, ry).setFontSize(20 * u);
+    this.resetText.setPosition(rx, ry).setFontSize(20 * s);
 
-    // bottom bar: fichas + 12h clock (left); play/pause, ranking, save (right)
-    const by = H - 40 * u;
+    // ---- bottom bar: fichas + clock (left); play/pause, ranking, save (right) ----
     const dotGap = 18 * u;
-    for (let i = 0; i < this.fichaDots.length; i++) this.fichaDots[i]?.setPosition(14 * u + i * dotGap, by).setScale(u * 0.9);
-    this.fichaText.setPosition(14 * u + MAX_FICHAS * dotGap + 2 * u, by).setFontSize(13 * u);
+    for (let i = 0; i < this.fichaDots.length; i++) this.fichaDots[i]?.setPosition(14 * u + i * dotGap, by).setScale(s * 0.9);
+    this.fichaText.setPosition(14 * u + MAX_FICHAS * dotGap + 2 * u, by).setFontSize(13 * s);
     const clkX = this.fichaText.x + this.fichaText.width + 12 * u;
-    this.clockIcon.setPosition(clkX, by).setDisplaySize(16 * u, 16 * u);
-    this.fichaSub.setPosition(clkX + 11 * u, by).setFontSize(12 * u);
+    this.clockIcon.setPosition(clkX, by).setDisplaySize(16 * s, 16 * s);
+    this.fichaSub.setPosition(clkX + 11 * u, by).setFontSize(12 * s);
 
-    const pillH = 34 * u;
-    const sq = 38 * u;
-    const saveW = 116 * u;
+    const sq = 38 * s;
+    const saveW = 116 * s;
     const saveCx = W - 10 * u - saveW / 2;
     this.saveImg.setPosition(saveCx, by).setDisplaySize(saveW, pillH);
-    this.saveIcon.setPosition(saveCx - saveW / 2 + 17 * u, by).setDisplaySize(22 * u, 22 * u);
-    this.saveText.setPosition(saveCx + 11 * u, by).setFontSize(13 * u);
+    this.saveIcon.setPosition(saveCx - saveW / 2 + 17 * s, by).setDisplaySize(22 * s, 22 * s);
+    this.saveText.setPosition(saveCx + 11 * s, by).setFontSize(13 * s);
     const rankCx = saveCx - saveW / 2 - 6 * u - sq / 2;
     this.rankImg.setPosition(rankCx, by).setDisplaySize(sq, pillH);
-    this.rankIcon.setPosition(rankCx, by).setDisplaySize(24 * u, 24 * u);
+    this.rankIcon.setPosition(rankCx, by).setDisplaySize(24 * s, 24 * s);
     const ppBx = rankCx - sq / 2 - 6 * u - sq / 2;
     this.ppImg.setPosition(ppBx, by).setDisplaySize(sq, pillH);
-    this.ppIcon.setPosition(ppBx, by).setDisplaySize(20 * u, 20 * u);
+    this.ppIcon.setPosition(ppBx, by).setDisplaySize(20 * s, 20 * s);
 
-    this.footer.setPosition(W / 2, H - 12 * u).setFontSize(10 * u);
-    this.toastText.setPosition(W / 2, top + gridH * 0.4).setFontSize(15 * u);
+    this.footer.setVisible(!compact).setPosition(W / 2, H - 12 * s).setFontSize(10 * s);
+    this.toastText.setPosition(W / 2, top + gridH * 0.4).setFontSize(15 * s);
 
     if (this.instrMenuOpen) this.layoutMenu();
     this.syncDomButtons();

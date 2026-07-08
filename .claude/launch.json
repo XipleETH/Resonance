@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "coodj-spike",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "serve", "dist/client", "-l", "5199", "--no-clipboard"],
+      "port": 5199
+    }
+  ]
+}
