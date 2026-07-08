@@ -36,8 +36,12 @@ const intOr = (v: string | undefined, d: number): number => {
 const currentPeriod = (now: number): number => Math.floor(now / REFILL_MS);
 const todayStr = (now: number): string => new Date(now).toISOString().slice(0, 10);
 
-// A grid cell's value encodes its placer + its wave: "by" (flat) or "by;type:depth:rate".
-const cellVal = (by: string, fx: TrackFx): string => (fx.depth > 0 ? `${by};${encodeFx(fx)}` : by);
+// A grid cell's value encodes its placer + its expression: "by" (flat) or "by;<encoded fx>".
+// Store whenever ANY expression is non-default (wave, pitch, ratchet, or duration), not just
+// the wave — otherwise a beat pitched/ratcheted without a wave would lose those on save.
+const cellHasFx = (fx: TrackFx): boolean =>
+  fx.depth > 0 || fx.pitch !== 0 || fx.sub !== 1 || Math.round(fx.dur * 100) !== 50;
+const cellVal = (by: string, fx: TrackFx): string => (cellHasFx(fx) ? `${by};${encodeFx(fx)}` : by);
 const parseCell = (value: string): { by: string; fx: TrackFx } => {
   const i = value.indexOf(';');
   return i < 0

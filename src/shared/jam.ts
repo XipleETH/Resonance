@@ -233,9 +233,18 @@ export type ProfileResponse = {
 // depth 0 = flat/off. rate = how stretched/compressed the wave is (LFO speed).
 // ---------------------------------------------------------------------------
 export type FxType = 'none' | 'vibrato' | 'tremolo' | 'wah';
-export type TrackFx = { type: FxType; depth: number; rate: number }; // depth & rate in 0..1
+// Per-beat expression. `type/depth/rate` = the wave (LFO). `pitch` shifts the beat up/down
+// the day's scale in scale-degrees (negative = down / "backwards"). `sub` = how many rapid
+// hits the beat fires within its step (1..4 → ♩ ♪♪ ♪³ ♬, a ratchet/roll). `dur` = note length
+// 0..1 (staccato → legato). All bundle into one beat edit (one ficha), never charged apart.
+export type TrackFx = { type: FxType; depth: number; rate: number; pitch: number; sub: number; dur: number };
 
-export const FLAT_FX: TrackFx = { type: 'vibrato', depth: 0, rate: 0.4 };
+export const PITCH_MIN = -7;
+export const PITCH_MAX = 7;
+export const SUB_MIN = 1;
+export const SUB_MAX = 4;
+
+export const FLAT_FX: TrackFx = { type: 'vibrato', depth: 0, rate: 0.4, pitch: 0, sub: 1, dur: 0.5 };
 
 export const FX_TARGETS: readonly { type: FxType; label: string; emoji: string }[] = [
   { type: 'vibrato', label: 'Vibrato', emoji: '🌊' },
@@ -244,16 +253,28 @@ export const FX_TARGETS: readonly { type: FxType; label: string; emoji: string }
 ];
 
 const clamp01 = (n: number): number => (n < 0 ? 0 : n > 1 ? 1 : n);
+const clampInt = (n: number, lo: number, hi: number): number => {
+  const r = Math.round(n);
+  return r < lo ? lo : r > hi ? hi : r;
+};
 
 export function encodeFx(fx: TrackFx): string {
-  return `${fx.type}:${Math.round(fx.depth * 100)}:${Math.round(fx.rate * 100)}`;
+  // type:depth:rate:pitch:sub:dur — the last three are optional on read (older beats default).
+  return `${fx.type}:${Math.round(fx.depth * 100)}:${Math.round(fx.rate * 100)}:${Math.round(fx.pitch)}:${Math.round(fx.sub)}:${Math.round(fx.dur * 100)}`;
 }
 export function decodeFx(s: string | undefined): TrackFx {
   if (!s) return { ...FLAT_FX };
   const parts = s.split(':');
   const t = parts[0] ?? 'vibrato';
   const type: FxType = t === 'vibrato' || t === 'tremolo' || t === 'wah' || t === 'none' ? t : 'vibrato';
-  return { type, depth: clamp01(Number(parts[1] ?? 0) / 100), rate: clamp01(Number(parts[2] ?? 40) / 100) };
+  return {
+    type,
+    depth: clamp01(Number(parts[1] ?? 0) / 100),
+    rate: clamp01(Number(parts[2] ?? 40) / 100),
+    pitch: parts[3] === undefined ? 0 : clampInt(Number(parts[3]), PITCH_MIN, PITCH_MAX),
+    sub: parts[4] === undefined ? 1 : clampInt(Number(parts[4]), SUB_MIN, SUB_MAX),
+    dur: parts[5] === undefined ? 0.5 : clamp01(Number(parts[5]) / 100),
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -132,6 +132,16 @@ export const ICONS: Record<string, string> = {
   fx_tremolo: wrap(`<path d="M7 16 L13 16 L19 10 L19 30 L13 24 L7 24 Z" fill="${INK}"/><path d="M24 15 Q28 20 24 25" fill="none"/><path d="M28 12 Q34 20 28 28" fill="none"/>`),
   fx_wah: wrap(`<path d="M6 28 C14 28 13 12 21 12 C29 12 28 22 34 20" fill="none" stroke-width="3"/>`),
 
+  // ---- per-beat pitch + ratchet (musical notation) ------------------------
+  // Pitch nudge arrows.
+  pitch_up: wrap(`<path d="M20 7 L31 21 L24 21 L24 32 L16 32 L16 21 L9 21 Z" fill="#8fd6a0"/>`),
+  pitch_dn: wrap(`<path d="M20 33 L9 19 L16 19 L16 8 L24 8 L24 19 L31 19 Z" fill="#e08f88"/>`),
+  // Ratchet = 1..4 beamed note-heads. The number of heads reads as the subdivision.
+  sub1: wrap(`<ellipse cx="15" cy="29" rx="5" ry="3.6" fill="${INK}" stroke="none"/><line x1="19.6" y1="28" x2="19.6" y2="9"/>`),
+  sub2: wrap(`<ellipse cx="10" cy="29" rx="4.6" ry="3.4" fill="${INK}" stroke="none"/><ellipse cx="26" cy="29" rx="4.6" ry="3.4" fill="${INK}" stroke="none"/><line x1="14.2" y1="28" x2="14.2" y2="10"/><line x1="30.2" y1="28" x2="30.2" y2="10"/><line x1="14.2" y1="10.5" x2="30.2" y2="10.5" stroke-width="3.2"/>`),
+  sub3: wrap(`<ellipse cx="8" cy="29" rx="4" ry="3" fill="${INK}" stroke="none"/><ellipse cx="20" cy="29" rx="4" ry="3" fill="${INK}" stroke="none"/><ellipse cx="32" cy="29" rx="4" ry="3" fill="${INK}" stroke="none"/><line x1="11.6" y1="28" x2="11.6" y2="10"/><line x1="23.6" y1="28" x2="23.6" y2="10"/><line x1="35.6" y1="28" x2="35.6" y2="10"/><line x1="11.6" y1="10.5" x2="35.6" y2="10.5" stroke-width="3"/>`),
+  sub4: wrap(`<ellipse cx="7" cy="29" rx="3.5" ry="2.7" fill="${INK}" stroke="none"/><ellipse cx="16" cy="29" rx="3.5" ry="2.7" fill="${INK}" stroke="none"/><ellipse cx="25" cy="29" rx="3.5" ry="2.7" fill="${INK}" stroke="none"/><ellipse cx="34" cy="29" rx="3.5" ry="2.7" fill="${INK}" stroke="none"/><line x1="10.2" y1="28" x2="10.2" y2="10"/><line x1="19.2" y1="28" x2="19.2" y2="10"/><line x1="28.2" y1="28" x2="28.2" y2="10"/><line x1="37.2" y1="28" x2="37.2" y2="10"/><line x1="10.2" y1="10.5" x2="37.2" y2="10.5" stroke-width="2.6"/><line x1="10.2" y1="14" x2="37.2" y2="14" stroke-width="2.6"/>`),
+
   // ---- UI -----------------------------------------------------------------
   play: wrap(`<path d="M14 10 L32 20 L14 30 Z" fill="#8fd6a0"/>`),
   pause: wrap(`<rect x="13" y="10" width="5.5" height="20" rx="2" fill="#8fd6a0"/><rect x="22" y="10" width="5.5" height="20" rx="2" fill="#8fd6a0"/>`),

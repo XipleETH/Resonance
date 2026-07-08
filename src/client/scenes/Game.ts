@@ -25,7 +25,11 @@ import {
   instrumentById,
   LIBRARY,
   MAX_FICHAS,
+  PITCH_MAX,
+  PITCH_MIN,
   STEPS,
+  SUB_MAX,
+  SUB_MIN,
   TRACKS,
   type FxType,
   type JamAction,
@@ -219,6 +223,16 @@ export class Game extends Scene {
   private fichaText!: Phaser.GameObjects.Text;
   private fichaSub!: Phaser.GameObjects.Text;
   private exprLabel!: Phaser.GameObjects.Text;
+  // per-beat editor (expanded only): pitch nudge ▼/▲, ratchet (redoble), duration
+  private edPitchDn!: Phaser.GameObjects.Image;
+  private edPitchDnIc!: Phaser.GameObjects.Image;
+  private edPitchUp!: Phaser.GameObjects.Image;
+  private edPitchUpIc!: Phaser.GameObjects.Image;
+  private edPitchVal!: Phaser.GameObjects.Text;
+  private edSub!: Phaser.GameObjects.Image;
+  private edSubIc!: Phaser.GameObjects.Image;
+  private edDur!: Phaser.GameObjects.Image;
+  private edDurTx!: Phaser.GameObjects.Text;
   private waveG!: Phaser.GameObjects.Graphics;
   private waveZone!: Phaser.GameObjects.Zone;
   private resetImg!: Phaser.GameObjects.Image;
@@ -341,6 +355,23 @@ export class Game extends Scene {
       img.on('pointerdown', () => this.pickFxTarget(tgt.type));
       this.fxChips.push({ img, icon, txt, type: tgt.type });
     }
+
+    // Per-beat editor row (expanded only). Pitch ▼/▲ shift the note up/down the scale;
+    // the redoble pill cycles the ratchet 1→4; the duración pill cycles staccato→legato.
+    this.edPitchDn = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
+    this.edPitchDnIc = this.add.image(0, 0, 'ic_pitch_dn');
+    this.edPitchDn.on('pointerdown', () => this.nudgePitch(-1));
+    this.edPitchUp = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
+    this.edPitchUpIc = this.add.image(0, 0, 'ic_pitch_up');
+    this.edPitchUp.on('pointerdown', () => this.nudgePitch(1));
+    this.edPitchVal = this.add.text(0, 0, 'tono 0', { fontFamily: CRAYON, fontSize: '12px', color: '#4a3a22' }).setOrigin(0.5);
+    this.edSub = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
+    this.edSubIc = this.add.image(0, 0, 'ic_sub1');
+    this.edSub.on('pointerdown', () => this.cycleSub());
+    this.edDur = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
+    this.edDurTx = this.add.text(0, 0, 'medio', { fontFamily: CRAYON, fontSize: '12px', color: '#4a3a22' }).setOrigin(0.5);
+    this.edDur.on('pointerdown', () => this.cycleDur());
+
     this.waveG = this.add.graphics();
     this.waveZone = this.add.zone(0, 0, 10, 10).setInteractive({ useHandCursor: true });
     this.waveZone.on('pointerdown', (p: Phaser.Input.Pointer) => this.onBarDown(p));
@@ -917,7 +948,10 @@ export class Game extends Scene {
     return this.draftCellFx.get(k) ?? this.sharedCells.get(k)?.fx ?? { ...FLAT_FX };
   }
   private fxKey(fx: TrackFx): string {
-    return fx.depth <= 0 ? 'off' : `${fx.type}:${Math.round(fx.depth * 100)}:${Math.round(fx.rate * 100)}`;
+    // Identity of a beat's whole expression, so ANY change (wave, pitch, ratchet, duration)
+    // registers as an edit for cost + commit. Wave folds to 'off' when depth is 0.
+    const wave = fx.depth <= 0 ? 'off' : `${fx.type}:${Math.round(fx.depth * 100)}:${Math.round(fx.rate * 100)}`;
+    return `${wave}|p${Math.round(fx.pitch)}|s${Math.round(fx.sub)}|d${Math.round(fx.dur * 100)}`;
   }
 
   private pendingCost(): number {
@@ -1024,7 +1058,48 @@ export class Game extends Scene {
     const k = this.selectedCell;
     if (!k) return this.toast('toca un beat primero', '#ffe0a0');
     const cur = this.effCellFx(k);
-    this.setDraftFx(k, { type, depth: cur.depth, rate: cur.rate });
+    this.setDraftFx(k, { ...cur, type });
+  }
+
+  // ---- per-beat pitch / ratchet / duration --------------------------------
+  private readonly DUR_LEVELS = [0.15, 0.5, 0.85]; // staccato · medio · legato
+  private nudgePitch(delta: number): void {
+    if (!this.gate()) return;
+    const k = this.selectedCell;
+    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
+    const cur = this.effCellFx(k);
+    const pitch = Phaser.Math.Clamp(cur.pitch + delta, PITCH_MIN, PITCH_MAX);
+    if (pitch === cur.pitch) return;
+    this.setDraftFx(k, { ...cur, pitch });
+  }
+  private cycleSub(): void {
+    if (!this.gate()) return;
+    const k = this.selectedCell;
+    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
+    const cur = this.effCellFx(k);
+    const sub = cur.sub >= SUB_MAX ? SUB_MIN : cur.sub + 1;
+    this.setDraftFx(k, { ...cur, sub });
+  }
+  private cycleDur(): void {
+    if (!this.gate()) return;
+    const k = this.selectedCell;
+    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
+    const cur = this.effCellFx(k);
+    let idx = this.DUR_LEVELS.findIndex((v) => Math.abs(v - cur.dur) < 0.08);
+    if (idx < 0) idx = 1;
+    const dur = this.DUR_LEVELS[(idx + 1) % this.DUR_LEVELS.length] ?? 0.5;
+    this.setDraftFx(k, { ...cur, dur });
+  }
+  private renderBeatEdit(): void {
+    const k = this.selectedCell;
+    const fx = k ? this.effCellFx(k) : null;
+    const a = fx ? 1 : 0.4;
+    for (const o of [this.edPitchDn, this.edPitchDnIc, this.edPitchUp, this.edPitchUpIc, this.edPitchVal, this.edSub, this.edSubIc, this.edDur, this.edDurTx]) o.setAlpha(a);
+    const p = fx ? fx.pitch : 0;
+    this.edPitchVal.setText(`tono ${p > 0 ? '+' + p : p}`);
+    this.edSubIc.setTexture(`ic_sub${fx ? fx.sub : 1}`);
+    const d = fx ? fx.dur : 0.5;
+    this.edDurTx.setText(d <= 0.3 ? 'corto' : d >= 0.7 ? 'largo' : 'medio');
   }
 
   // ---- wave drag ------------------------------------------------------------
@@ -1053,7 +1128,7 @@ export class Game extends Scene {
     const depth = Phaser.Math.Clamp(wd.d0 + (wd.sy - p.y) / (this.waveBox.h * 0.8), 0, 1);
     const rate = Phaser.Math.Clamp(wd.r0 + (p.x - wd.sx) / this.waveBox.w, 0, 1);
     const cur = this.effCellFx(wd.cell);
-    this.setDraftFx(wd.cell, { type: cur.type === 'none' ? 'vibrato' : cur.type, depth, rate }, true);
+    this.setDraftFx(wd.cell, { ...cur, type: cur.type === 'none' ? 'vibrato' : cur.type, depth, rate }, true);
   }
 
   /** Stage a wave change for a cell. Blocks if it would cost more than you have. */
@@ -1244,6 +1319,7 @@ export class Game extends Scene {
     this.renderFichas();
     this.renderHeader();
     this.renderExpression();
+    this.renderBeatEdit();
     this.drawWave();
     this.renderSave();
     this.renderFs();
@@ -1437,10 +1513,12 @@ export class Game extends Scene {
     const chipH = 28 * s;
     const waveH = 52 * s;
     const rBtn = 40 * s;
+    const edH = 30 * s; // per-beat editor row (expanded only)
     const waveBottom = by - pillH / 2 - 12 * s;
     const waveTop = waveBottom - waveH;
     const fxY = waveTop - 10 * s - chipH / 2; // FX row centre (expanded only)
-    const exprTop = (compact ? waveTop : fxY - chipH / 2) - 16 * s; // label above the block
+    const edY = fxY - chipH / 2 - 10 * s - edH / 2; // pitch/redoble/duración row centre
+    const exprTop = (compact ? waveTop : edY - edH / 2) - 16 * s; // label at the top of the block
 
     // ---- grid: fills from the top band down to just above the expression block
     // (or, when compact, straight down to the bottom bar — no wave/FX inline). ----
@@ -1488,6 +1566,26 @@ export class Game extends Scene {
       c.icon.setPosition(fxLeft + fxIcSz / 2, fxY).setDisplaySize(fxIcSz, fxIcSz);
       c.txt.setPosition(fxLeft + fxIcSz + 4 * u, fxY).setFontSize(11 * s);
     }
+    // ---- per-beat editor row: pitch ▼/▲ · redoble · duración (expanded only) ----
+    const edPw = 30 * s; // square pill for the arrows
+    const edIc = edH * 0.6;
+    let ex = 14 * u;
+    this.edPitchDn.setVisible(!compact).setPosition(ex + edPw / 2, edY).setDisplaySize(edPw, edH);
+    this.edPitchDnIc.setVisible(!compact).setPosition(ex + edPw / 2, edY).setDisplaySize(edIc, edIc);
+    ex += edPw + 4 * u;
+    this.edPitchVal.setVisible(!compact).setPosition(ex + 31 * s, edY).setFontSize(12 * s);
+    ex += 62 * s + 4 * u;
+    this.edPitchUp.setVisible(!compact).setPosition(ex + edPw / 2, edY).setDisplaySize(edPw, edH);
+    this.edPitchUpIc.setVisible(!compact).setPosition(ex + edPw / 2, edY).setDisplaySize(edIc, edIc);
+    ex += edPw + 14 * u;
+    const edSubW = 46 * s;
+    this.edSub.setVisible(!compact).setPosition(ex + edSubW / 2, edY).setDisplaySize(edSubW, edH);
+    this.edSubIc.setVisible(!compact).setPosition(ex + edSubW / 2, edY).setDisplaySize(edH * 0.78, edH * 0.78);
+    ex += edSubW + 14 * u;
+    const edDurW = 78 * s;
+    this.edDur.setVisible(!compact).setPosition(ex + edDurW / 2, edY).setDisplaySize(edDurW, edH);
+    this.edDurTx.setVisible(!compact).setPosition(ex + edDurW / 2, edY).setFontSize(12 * s);
+
     // wave bar + reset button beside it (expanded only)
     this.waveBox = { x: 14 * u, y: waveTop, w: W - 28 * u - rBtn - 8 * u, h: waveH };
     this.waveZone.setPosition(this.waveBox.x + this.waveBox.w / 2, this.waveBox.y + this.waveBox.h / 2).setSize(this.waveBox.w, this.waveBox.h);

@@ -54,12 +54,19 @@ function isPitched(inst: Instrument): boolean {
   return inst.category === 'bass' || inst.category === 'melody' || inst.category === 'fx' || inst.category === 'pad';
 }
 
-/** Note for a pitched instrument at a given step (spreads a pentatonic phrase across the bar). */
-function scaleNote(rootPc: number, inst: Instrument, step: number): string {
-  const degree = step % MINOR_PENT.length;
+/**
+ * Note for a pitched instrument at a given step (spreads a pentatonic phrase across the bar).
+ * `offset` shifts this beat up/down the scale in scale-degrees (per-beat pitch; negative = down /
+ * "backwards"), wrapping through octaves. offset 0 = the original column-derived pitch.
+ */
+function scaleNote(rootPc: number, inst: Instrument, step: number, offset = 0): string {
+  const L = MINOR_PENT.length;
   const octBump = step >= 8 ? 1 : 0; // second half of the bar climbs an octave
+  const totalDeg = (step % L) + offset;
+  const degree = ((totalDeg % L) + L) % L;
+  const degOct = Math.floor(totalDeg / L);
   const semi = rootPc + (MINOR_PENT[degree] ?? 0);
-  const octave = baseOctaveFor(inst) + octBump + Math.floor(semi / 12);
+  const octave = baseOctaveFor(inst) + octBump + degOct + Math.floor(semi / 12);
   return `${NOTE_NAMES[semi % 12] ?? 'C'}${octave}`;
 }
 
@@ -203,7 +210,8 @@ function triggerBase(
   synth: AnySynth,
   step: number,
   time: number,
-  dur: number | undefined
+  dur: number | undefined,
+  offset = 0
 ): { pitched: boolean; baseHz: number } {
   if (synth instanceof Tone.NoiseSynth) {
     synth.triggerAttackRelease(dur ?? (inst.id === 'pah' || inst.id === 'clap' ? '8n' : '16n'), time);
@@ -214,7 +222,7 @@ function triggerBase(
     return { pitched: false, baseHz: 0 };
   }
   const pitched = isPitched(inst);
-  const note = pitched ? scaleNote(rootPc, inst, step) : (inst.note ?? 'C2');
+  const note = pitched ? scaleNote(rootPc, inst, step, offset) : (inst.note ?? 'C2');
   synth.frequency.cancelScheduledValues(time);
   synth.triggerAttackRelease(note, dur ?? '16n', time);
   return { pitched, baseHz: hz(note) };
@@ -343,7 +351,11 @@ function applyRecipe(r: string, inst: Instrument, synth: PitchedSynth, step: num
   }
 }
 
-/** Play a beat and apply ITS wave (per-cell fx) as a per-note modulation. */
+/**
+ * Play a beat and apply ITS wave (per-cell fx) as a per-note modulation.
+ * `fx.pitch` shifts the note up/down the scale; `fx.sub` fires it as 1..4 rapid hits (a
+ * ratchet/roll within the step); `fx.dur` sets each hit's length (staccato → legato).
+ */
 function triggerVoice(
   inst: Instrument,
   synth: AnySynth,
@@ -353,21 +365,38 @@ function triggerVoice(
   step: number,
   time: number
 ): void {
-  // reset this track's modulation to neutral for the note
-  gain.gain.cancelScheduledValues(time);
-  gain.gain.setValueAtTime(1, time);
-  filter.frequency.cancelScheduledValues(time);
-  filter.frequency.setValueAtTime(FILTER_OPEN, time);
-
+  const sub = Math.max(1, Math.min(4, Math.round(fx?.sub ?? 1)));
+  const durN = fx?.dur ?? 0.5;
+  const pitch = fx?.pitch ?? 0;
+  const stepDur = Tone.Time('16n').toSeconds();
+  const slot = stepDur / sub; // time budget per ratchet hit
+  // note length: staccato (short) → legato (rings ~1.6 steps for a single hit). For a ratchet
+  // the length is capped to the slot so hits stay distinct.
+  const legatoMax = sub > 1 ? slot * 0.95 : stepDur * 1.6;
+  const staccatoMin = sub > 1 ? slot * 0.2 : stepDur * 0.22;
   const hasFx = !!fx && fx.type !== 'none' && fx.depth > 0;
-  const base = triggerBase(inst, synth, step, time, hasFx ? 0.4 : undefined);
+  // Ratchet hits stay short so they read as distinct; a single beat with a wave gets a
+  // sustained note so the LFO has room to modulate it. The LFO window follows the note.
+  const dryLen = staccatoMin + (legatoMax - staccatoMin) * durN;
+  const noteLen = sub > 1 ? dryLen : hasFx ? Math.max(dryLen, 0.35) : dryLen;
+  const win = Math.max(noteLen, 0.1);
+  const cyc = fx ? 0.5 + fx.rate * 3 : 1;
 
-  if (!hasFx || !fx) return;
-  const cyc = 0.5 + fx.rate * 3;
-  if (fx.type === 'tremolo') applyRamps(gain.gain, tremoloCurve(fx.depth, cyc), time, 0.4);
-  else if (fx.type === 'wah') applyRamps(filter.frequency, wahCurve(fx.depth, cyc), time, 0.4);
-  else if (fx.type === 'vibrato' && base.pitched && base.baseHz > 0 && !(synth instanceof Tone.NoiseSynth))
-    applyRamps(synth.frequency, vibratoCurve(base.baseHz, fx.depth, cyc), time, 0.4);
+  for (let k = 0; k < sub; k++) {
+    const t = time + k * slot;
+    // reset this track's modulation to neutral for each hit
+    gain.gain.cancelScheduledValues(t);
+    gain.gain.setValueAtTime(1, t);
+    filter.frequency.cancelScheduledValues(t);
+    filter.frequency.setValueAtTime(FILTER_OPEN, t);
+
+    const base = triggerBase(inst, synth, step, t, noteLen, pitch);
+    if (!hasFx || !fx) continue;
+    if (fx.type === 'tremolo') applyRamps(gain.gain, tremoloCurve(fx.depth, cyc), t, win);
+    else if (fx.type === 'wah') applyRamps(filter.frequency, wahCurve(fx.depth, cyc), t, win);
+    else if (fx.type === 'vibrato' && base.pitched && base.baseHz > 0 && !(synth instanceof Tone.NoiseSynth))
+      applyRamps(synth.frequency, vibratoCurve(base.baseHz, fx.depth, cyc), t, win);
+  }
 }
 
 export async function initAudio(): Promise<void> {
