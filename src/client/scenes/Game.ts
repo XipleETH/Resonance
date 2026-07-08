@@ -1402,8 +1402,9 @@ export class Game extends Scene {
     const u = W / 410;
     this.u = u;
     // Height-aware scale: on a wide-but-short inline frame (desktop feed card) plain `u`
-    // overflows vertically; `s` caps growth to the available height. Portrait ≈ u.
-    const s = Math.min(u, H / 730);
+    // overflows vertically; `s` caps growth to the available height. The divisor is tuned
+    // so short frames still get comfortably-sized chrome (title / buttons / BPM); portrait ≈ u.
+    const s = Math.min(u, H / 560);
     this.s = s;
     // Inline (in the feed) = compact preview: no FX chips, taller pads, controls low.
     // Expanded (fullscreen, any device) = the complete studio, like the Android app.
@@ -1441,11 +1442,13 @@ export class Game extends Scene {
     const fxY = waveTop - 10 * s - chipH / 2; // FX row centre (expanded only)
     const exprTop = (compact ? waveTop : fxY - chipH / 2) - 16 * s; // label above the block
 
-    // ---- grid: fills from the top band down to just above the expression block ----
+    // ---- grid: fills from the top band down to just above the expression block
+    // (or, when compact, straight down to the bottom bar — no wave/FX inline). ----
     const labelW = Phaser.Math.Clamp(W * 0.22, 70 * s, 130 * s);
     const left = labelW + 6 * u;
     const top = 88 * s;
-    const gridH = Math.max(exprTop - 16 * s - top, 120 * s);
+    const gridAnchor = compact ? by - pillH / 2 : exprTop;
+    const gridH = Math.max(gridAnchor - 16 * s - top, 120 * s);
     const cellW = (W - 10 * u - left) / STEPS;
     const rowH = gridH / TRACKS;
     this.gridBox = { left, top, cellW, rowH };
@@ -1468,8 +1471,8 @@ export class Game extends Scene {
     this.playhead.setSize(cellW, rowH * TRACKS);
     this.onStepVisual(this.curStep);
 
-    // ---- expression: label + FX chips (expanded only) + wave bar ----
-    this.exprLabel.setPosition(14 * u, exprTop).setFontSize(12 * s);
+    // ---- expression: label + FX chips + wave bar — all EXPANDED-only (hidden inline) ----
+    this.exprLabel.setVisible(!compact).setPosition(14 * u, exprTop).setFontSize(12 * s);
     this.dateText.setPosition(W - 12 * u, top + gridH + 14 * s).setFontSize(11 * s);
     const chipW = (W - 28 * u - 12 * u) / 3;
     for (let i = 0; i < this.fxChips.length; i++) {
@@ -1485,13 +1488,15 @@ export class Game extends Scene {
       c.icon.setPosition(fxLeft + fxIcSz / 2, fxY).setDisplaySize(fxIcSz, fxIcSz);
       c.txt.setPosition(fxLeft + fxIcSz + 4 * u, fxY).setFontSize(11 * s);
     }
-    // wave bar + reset button beside it
+    // wave bar + reset button beside it (expanded only)
     this.waveBox = { x: 14 * u, y: waveTop, w: W - 28 * u - rBtn - 8 * u, h: waveH };
     this.waveZone.setPosition(this.waveBox.x + this.waveBox.w / 2, this.waveBox.y + this.waveBox.h / 2).setSize(this.waveBox.w, this.waveBox.h);
+    if (this.waveZone.input) this.waveZone.input.enabled = !compact;
+    this.waveG.setVisible(!compact);
     const rx = this.waveBox.x + this.waveBox.w + 8 * u + rBtn / 2;
     const ry = this.waveBox.y + this.waveBox.h / 2;
-    this.resetImg.setPosition(rx, ry).setDisplaySize(rBtn, this.waveBox.h);
-    this.resetText.setPosition(rx, ry).setFontSize(20 * s);
+    this.resetImg.setVisible(!compact).setPosition(rx, ry).setDisplaySize(rBtn, this.waveBox.h);
+    this.resetText.setVisible(!compact).setPosition(rx, ry).setFontSize(20 * s);
 
     // ---- bottom bar: fichas + clock (left); play/pause, ranking, save (right) ----
     const dotGap = 18 * u;
