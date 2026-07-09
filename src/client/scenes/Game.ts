@@ -462,6 +462,25 @@ export class Game extends Scene {
     this.assignPool();
     this.showMenu(false);
 
+    // Tactile "press" feedback on every button (they were flat before): a quick dip + a
+    // springy Back.out return so they feel like real, raised keys. Pass each button's face
+    // (icon/label) so the whole thing dips together.
+    this.addPress(this.tempoDown, this.tempoDownT);
+    this.addPress(this.tempoUp, this.tempoUpT);
+    this.addPress(this.saveImg, this.saveIcon, this.saveText);
+    this.addPress(this.ppImg, this.ppIcon);
+    this.addPress(this.resetImg, this.resetText);
+    this.addPress(this.edPitchDn, this.edPitchDnIc);
+    this.addPress(this.edPitchUp, this.edPitchUpIc);
+    this.addPress(this.edSub, this.edSubIc, this.edSubTx);
+    for (const c of this.fxChips) this.addPress(c.img, c.icon, c.txt);
+    for (const li of this.labelIcons) this.addPress(li);
+    for (const row of this.cells) for (const cell of row) this.addPress(cell);
+    for (const m of this.menuChips) this.addPress(m.img, m.icon, m.txt);
+    // fs + rank are DOM-overlay buttons; their pills dip from the DOM pointerdown (setupDomButtons).
+    this.fsImg.setData('face', [this.fsIcon]);
+    this.rankImg.setData('face', [this.rankIcon]);
+
     onStep((step) => this.onStepVisual(step));
     this.setupDomButtons();
     this.layout();
@@ -633,6 +652,7 @@ export class Game extends Scene {
       if (this.instrMenuOpen) return;
       this.toggleFullscreen(ev);
     });
+    this.fsBtn.addEventListener('pointerdown', () => this.pressFx(this.fsImg)); // DOM overlay → animate its pill
     // Full-canvas catcher (inline only). Being a real DOM button it yields the trusted
     // click Devvit needs. Play/pause is handled inline here; everything else stashes what
     // was tapped and expands, so the flow resumes on the (reloaded) expanded page.
@@ -649,6 +669,7 @@ export class Game extends Scene {
     // Ranking button (DOM so it clicks reliably inline or expanded), sits over the rank pill.
     this.rankBtn = make();
     this.rankBtn.addEventListener('click', () => void this.openRanking());
+    this.rankBtn.addEventListener('pointerdown', () => this.pressFx(this.rankImg));
     this.setupRankingOverlay();
   }
 
@@ -761,7 +782,10 @@ export class Game extends Scene {
     // Play/pause stays inline so people can listen in the feed without expanding. If this
     // gesture just woke+started the post, don't immediately toggle it back to pause.
     if (this.ppImg.getBounds().contains(gx, gy)) {
-      if (!woke && this.gate()) this.togglePlayPause();
+      if (!woke && this.gate()) {
+        this.pressFx(this.ppImg);
+        this.togglePlayPause();
+      }
       return;
     }
     if (!this.active) {
@@ -1088,6 +1112,30 @@ export class Game extends Scene {
     this.edPitchVal.setText(`tono ${p > 0 ? '+' + p : p}`);
     this.edSubIc.setTexture(`ic_sub${fx ? fx.sub : 1}`);
     this.edSubTx.setText(`redoble ×${fx ? fx.sub : 1}`);
+  }
+
+  // ---- tactile button feedback --------------------------------------------
+  /**
+   * A quick press dip + springy return, so a flat pill reads as a real pressable key. The
+   * pill and its face (icon/label) dip together so the whole button moves, not just the base.
+   */
+  private pressFx(img?: Phaser.GameObjects.Image): void {
+    if (!img || img.getData('pressing')) return;
+    img.setData('pressing', true);
+    const parts = [img, ...((img.getData('face') as Phaser.GameObjects.GameObject[] | undefined) ?? [])];
+    for (const p of parts) {
+      const t = p as unknown as { scaleX: number; scaleY: number; setScale: (x: number, y: number) => void };
+      const sx = t.scaleX;
+      const sy = t.scaleY;
+      t.setScale(sx * 0.9, sy * 0.85); // dip in on press
+      this.tweens.add({ targets: p, scaleX: sx, scaleY: sy, duration: 170, ease: 'Back.out' });
+    }
+    this.time.delayedCall(190, () => img.setData('pressing', false));
+  }
+  /** Wire tactile feedback; `face` are the icon/label objects that should dip with the pill. */
+  private addPress(img: Phaser.GameObjects.Image, ...face: Phaser.GameObjects.GameObject[]): void {
+    if (face.length) img.setData('face', face);
+    img.on('pointerdown', () => this.pressFx(img));
   }
 
   // ---- wave drag ------------------------------------------------------------
