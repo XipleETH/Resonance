@@ -161,7 +161,9 @@ function buildSynth(inst: Instrument): AnySynth {
         envelope: envOf(inst, [0.01, 0.2, 0.3, 0.15]),
       });
     case 'fm':
-      return new Tone.FMSynth({ volume: V(-15), portamento: inst.glide ?? 0, envelope: envOf(inst, [0.01, 0.2, 0.2, 0.2]) });
+      // FM is inherently quieter than mono/membrane, so its default sits higher — otherwise
+      // the FM recipe sounds (lobo/búho/pájaro/láser…) come out weak next to everything else.
+      return new Tone.FMSynth({ volume: V(-10), portamento: inst.glide ?? 0, envelope: envOf(inst, [0.01, 0.2, 0.2, 0.2]) });
     case 'am':
       return new Tone.AMSynth({ volume: V(-14), portamento: inst.glide ?? 0, oscillator: { type: inst.osc ?? 'sine' }, envelope: envOf(inst, [0.01, 0.2, 0.3, 0.2]) });
     case 'duo':
