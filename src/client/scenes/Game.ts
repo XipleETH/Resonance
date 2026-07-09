@@ -1498,10 +1498,11 @@ export class Game extends Scene {
     const u = this.u;
     const s = this.s;
     this.bpmText.setText(`${this.bpm + this.draftTempo} BPM`).setFontSize(15 * s).setOrigin(0.5);
-    const cx = W - 84 * u;
     const y = 56 * s;
-    this.bpmText.setPosition(cx, y);
     const half = this.bpmText.width / 2;
+    // Right-align the [-] BPM [+] group against the right edge (below the ⛶ button).
+    const cx = W - 12 * u - 37 * s - half;
+    this.bpmText.setPosition(cx, y);
     this.tempoDown.setPosition(cx - half - 20 * s, y).setDisplaySize(34 * s, 30 * s);
     this.tempoDownT.setPosition(cx - half - 20 * s, y).setFontSize(22 * s);
     this.tempoUp.setPosition(cx + half + 20 * s, y).setDisplaySize(34 * s, 30 * s);

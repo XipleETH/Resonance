@@ -10,7 +10,9 @@ import { AUTO, Game } from 'phaser';
 // high-density phones the canvas is upscaled and looks blurry. Fix: make the backing
 // buffer match device pixels (size = CSS px × DPR) and let FIT scale it to the viewport.
 // The scene lays out proportionally (u = width/410) so it looks identical, just sharp.
-const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
+// Floor at 2× so it also supersamples on desktop (where devicePixelRatio is usually 1 but
+// the Devvit webview gets scaled up) — that's what was making the text/icons look blurry.
+const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
 // Responsive: fill whatever the web view gives us (feed card, fullscreen, desktop). The
 // scene lays out proportionally (u = width/410) so it adapts to any size. Backing buffer =
 // CSS px × DPR so it stays sharp on high-density screens; FIT scales it to the container.
