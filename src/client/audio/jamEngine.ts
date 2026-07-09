@@ -66,7 +66,8 @@ function scaleNote(rootPc: number, inst: Instrument, step: number, offset = 0): 
   const degree = ((totalDeg % L) + L) % L;
   const degOct = Math.floor(totalDeg / L);
   const semi = rootPc + (MINOR_PENT[degree] ?? 0);
-  const octave = baseOctaveFor(inst) + octBump + degOct + Math.floor(semi / 12);
+  // Clamp to an audible range so a big pitch offset can't push a note subsonic (silent) or ultrasonic.
+  const octave = Math.min(7, Math.max(1, baseOctaveFor(inst) + octBump + degOct + Math.floor(semi / 12)));
   return `${NOTE_NAMES[semi % 12] ?? 'C'}${octave}`;
 }
 
@@ -121,13 +122,18 @@ const envOf = (inst: Instrument, d: [number, number, number, number]): { attack:
   return { attack: e[0], decay: e[1], sustain: e[2], release: e[3] };
 };
 
+// Loudness normalization: the library's hand-tuned volumes span ~-3 to -26 dB, so the
+// quietest sounds (bright metals, soft shakers) were nearly inaudible. Floor the effective
+// volume so nothing drops below VOL_FLOOR — drums still sit louder than cymbals, but every
+// sound is now audible on its own.
+const VOL_FLOOR = -16;
 function buildSynth(inst: Instrument): AnySynth {
-  const v = inst.vol;
+  const V = (d: number): number => Math.max(VOL_FLOOR, inst.vol ?? d);
   switch (inst.synth) {
     case 'membrane': {
       const deep = inst.id === 'sub' || inst.id === 'boom';
       return new Tone.MembraneSynth({
-        volume: v ?? (deep ? -3 : -4),
+        volume: V(deep ? -3 : -4),
         pitchDecay: deep ? 0.08 : 0.03,
         octaves: deep ? 8 : 5,
         envelope: envOf(inst, [0.001, deep ? 0.5 : 0.32, 0, 0.2]),
@@ -139,32 +145,32 @@ function buildSynth(inst: Instrument): AnySynth {
       const decay = inst.env ? inst.env[1] : short ? 0.03 : long ? 0.5 : 0.14;
       const type = inst.noise ?? (inst.id === 'snare' || inst.id === 'pah' ? 'pink' : 'white');
       return new Tone.NoiseSynth({
-        volume: v ?? (short ? -20 : -13),
+        volume: V(short ? -20 : -13),
         noise: { type },
         envelope: { attack: inst.env?.[0] ?? 0.001, decay, sustain: 0 },
       });
     }
     case 'metal':
-      return new Tone.MetalSynth({ volume: v ?? -22 });
+      return new Tone.MetalSynth({ volume: V(-22) });
     case 'mono':
       return new Tone.MonoSynth({
-        volume: v ?? -11,
+        volume: V(-11),
         portamento: inst.glide ?? 0,
         oscillator: { type: inst.osc ?? (inst.recipe === 'meow' || inst.recipe === 'bark' ? 'sawtooth' : 'square') },
         filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 0.2, baseFrequency: inst.filterHz ?? 400, octaves: 3 },
         envelope: envOf(inst, [0.01, 0.2, 0.3, 0.15]),
       });
     case 'fm':
-      return new Tone.FMSynth({ volume: v ?? -15, portamento: inst.glide ?? 0, envelope: envOf(inst, [0.01, 0.2, 0.2, 0.2]) });
+      return new Tone.FMSynth({ volume: V(-15), portamento: inst.glide ?? 0, envelope: envOf(inst, [0.01, 0.2, 0.2, 0.2]) });
     case 'am':
-      return new Tone.AMSynth({ volume: v ?? -14, portamento: inst.glide ?? 0, oscillator: { type: inst.osc ?? 'sine' }, envelope: envOf(inst, [0.01, 0.2, 0.3, 0.2]) });
+      return new Tone.AMSynth({ volume: V(-14), portamento: inst.glide ?? 0, oscillator: { type: inst.osc ?? 'sine' }, envelope: envOf(inst, [0.01, 0.2, 0.3, 0.2]) });
     case 'duo':
-      return new Tone.DuoSynth({ volume: v ?? -17, vibratoAmount: 0.15 });
+      return new Tone.DuoSynth({ volume: V(-17), vibratoAmount: 0.15 });
     case 'synth':
     case 'pluck':
     default:
       return new Tone.Synth({
-        volume: v ?? -14,
+        volume: V(-14),
         oscillator: { type: inst.osc ?? 'triangle' },
         envelope: envOf(inst, [0.005, 0.2, 0.1, 0.2]),
       });
@@ -378,7 +384,8 @@ function triggerVoice(
   // Ratchet hits stay short so they read as distinct; a single beat with a wave gets a
   // sustained note so the LFO has room to modulate it. The LFO window follows the note.
   const dryLen = staccatoMin + (legatoMax - staccatoMin) * durN;
-  const noteLen = sub > 1 ? dryLen : hasFx ? Math.max(dryLen, 0.35) : dryLen;
+  // Never below ~45ms, or a percussive attack can be cut to silence.
+  const noteLen = Math.max(0.045, sub > 1 ? dryLen : hasFx ? Math.max(dryLen, 0.35) : dryLen);
   const win = Math.max(noteLen, 0.1);
   const cyc = fx ? 0.5 + fx.rate * 3 : 1;
 
