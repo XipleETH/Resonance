@@ -44,8 +44,33 @@ import {
 
 const KRAFT = '#cdb083';
 const INK = 0x3a2f22;
-const WAVE_FILL = 0xe7d6ac; // wave bar fill — FIXED (not themed) to keep the app's personality
+const WAVE_FILL = 0xe7d6ac; // wave button fill — FIXED (not themed) to keep the app's personality
 const CRAYON = '"Gochi Hand", "Comic Sans MS", "Marker Felt", "Segoe Print", cursive';
+
+// The wave used to be a 2-axis drag bar. Dragging is hostile on a phone (the feed steals the
+// gesture) so it's now a BUTTON that cycles these presets — the waveform still draws inside it.
+const WAVE_PRESETS: readonly { name: string; depth: number; rate: number }[] = [
+  { name: 'sin onda', depth: 0, rate: 0.4 },
+  { name: 'suave', depth: 0.35, rate: 0.3 },
+  { name: 'media', depth: 0.6, rate: 0.5 },
+  { name: 'fuerte', depth: 0.92, rate: 0.6 },
+  { name: 'rápida', depth: 0.7, rate: 0.95 },
+];
+/** Which preset a beat's wave is closest to (older beats came from the free drag). */
+const waveIdx = (fx: TrackFx): number => {
+  let best = 0;
+  let bd = Infinity;
+  for (let i = 0; i < WAVE_PRESETS.length; i++) {
+    const p = WAVE_PRESETS[i];
+    if (!p) continue;
+    const d = Math.abs(p.depth - fx.depth) * 2 + Math.abs(p.rate - fx.rate);
+    if (d < bd) {
+      bd = d;
+      best = i;
+    }
+  }
+  return best;
+};
 
 // Per-day palette so every day looks different — but ONLY the "paper" surfaces (background
 // + panel) shift. The wave bar, reset button, fx chips, note pads and main buttons keep
@@ -234,8 +259,9 @@ export class Game extends Scene {
   private edSub!: Phaser.GameObjects.Image;
   private edSubIc!: Phaser.GameObjects.Image;
   private edSubTx!: Phaser.GameObjects.Text;
-  private waveG!: Phaser.GameObjects.Graphics;
-  private waveZone!: Phaser.GameObjects.Zone;
+  private wavePill!: Phaser.GameObjects.Image; // the wave BUTTON (tap = next preset)
+  private waveG!: Phaser.GameObjects.Graphics; // the waveform drawn inside it
+  private waveTx!: Phaser.GameObjects.Text; // its preset name
   private resetImg!: Phaser.GameObjects.Image;
   private resetText!: Phaser.GameObjects.Text;
   private saveImg!: Phaser.GameObjects.Image;
@@ -269,7 +295,6 @@ export class Game extends Scene {
   private s = 1;
   private gridBox = { left: 0, top: 0, cellW: 10, rowH: 10 };
   private waveBox = { x: 0, y: 0, w: 10, h: 10 };
-  private waveDrag: { sx: number; sy: number; d0: number; r0: number; cell: string } | null = null;
   // Devvit's requestExpandedMode/exitExpandedMode ONLY accept a trusted native `click`,
   // and Phaser preventDefaults touchstart on the canvas which suppresses the synthetic
   // click on mobile — so canvas taps can never trigger them. fsBtn is a real DOM button
@@ -298,7 +323,7 @@ export class Game extends Scene {
     // Paint TODAY's palette immediately (no flash of base colors). The init fetch later
     // confirms it via meta.day — same day → no change; an old post → corrects then.
     this.cameras.main.setBackgroundColor(this.theme.bg);
-    this.bg = this.add.tileSprite(0, 0, this.scale.width, this.scale.height, 'cb_card').setOrigin(0).setTint(this.theme.card);
+    this.bg = this.add.tileSprite(0, 0, this.scale.width, this.scale.height, 'cb_card').setOrigin(0).setTint(this.theme.card).setDepth(-10);
     // Full-surface catcher (behind everything): any tap on the post wakes it.
     this.bgZone = this.add.zone(0, 0, 10, 10).setOrigin(0).setInteractive();
     this.bgZone.on('pointerdown', () => this.gate());
@@ -359,7 +384,9 @@ export class Game extends Scene {
 
     // Per-beat editor (expanded only), two panels. LEFT: tono ▼/▲ (top) + repeticiones (bottom,
     // big); RIGHT: the wave targets + wave bar (created below). edPanels draws the divider.
-    this.edPanels = this.add.graphics();
+    // Behind the editor controls (it's created after them, so it needs an explicit depth or it
+    // would tint the FX chips / wave button it sits under).
+    this.edPanels = this.add.graphics().setDepth(-1);
     this.edPitchDn = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
     this.edPitchDnIc = this.add.image(0, 0, 'ic_pitch_dn');
     this.edPitchDn.on('pointerdown', () => this.nudgePitch(-1));
@@ -372,13 +399,11 @@ export class Game extends Scene {
     this.edSubTx = this.add.text(0, 0, 'redoble', { fontFamily: CRAYON, fontSize: '12px', color: '#4a3a22' }).setOrigin(0, 0.5);
     this.edSub.on('pointerdown', () => this.cycleSub());
 
+    // Wave BUTTON: tap cycles the presets. Pill first, then the waveform on top, then the name.
+    this.wavePill = this.add.image(0, 0, 'cb_pill').setTint(WAVE_FILL).setInteractive({ useHandCursor: true });
+    this.wavePill.on('pointerdown', () => this.cycleWave());
     this.waveG = this.add.graphics();
-    this.waveZone = this.add.zone(0, 0, 10, 10).setInteractive({ useHandCursor: true });
-    this.waveZone.on('pointerdown', (p: Phaser.Input.Pointer) => this.onBarDown(p));
-    this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onWaveMove(p));
-    this.input.on('pointerup', () => {
-      this.waveDrag = null;
-    });
+    this.waveTx = this.add.text(0, 0, 'onda', { fontFamily: CRAYON, fontSize: '12px', color: '#6a5636' }).setOrigin(0, 0.5);
     // Same-origin webviews coordinate over a BroadcastChannel so only ONE post plays:
     // when another post claims audio, this one goes to sleep (pauses + needs re-waking).
     try {
@@ -473,6 +498,7 @@ export class Game extends Scene {
     this.addPress(this.edPitchDn, this.edPitchDnIc);
     this.addPress(this.edPitchUp, this.edPitchUpIc);
     this.addPress(this.edSub, this.edSubIc, this.edSubTx);
+    this.addPress(this.wavePill, this.waveTx);
     for (const c of this.fxChips) this.addPress(c.img, c.icon, c.txt);
     for (const li of this.labelIcons) this.addPress(li);
     for (const row of this.cells) for (const cell of row) this.addPress(cell);
@@ -588,7 +614,6 @@ export class Game extends Scene {
   }
   private goSleep(): void {
     this.active = false;
-    this.waveDrag = null;
     if (this.audioReady) setPlaying(false);
     this.renderPlayPause();
   }
@@ -1107,11 +1132,12 @@ export class Game extends Scene {
     const k = this.selectedCell;
     const fx = k ? this.effCellFx(k) : null;
     const a = fx ? 1 : 0.4;
-    for (const o of [this.edPitchDn, this.edPitchDnIc, this.edPitchUp, this.edPitchUpIc, this.edPitchVal, this.edSub, this.edSubIc, this.edSubTx]) o.setAlpha(a);
+    for (const o of [this.edPitchDn, this.edPitchDnIc, this.edPitchUp, this.edPitchUpIc, this.edPitchVal, this.edSub, this.edSubIc, this.edSubTx, this.wavePill, this.waveTx, this.waveG]) o.setAlpha(a);
     const p = fx ? fx.pitch : 0;
     this.edPitchVal.setText(`tono ${p > 0 ? '+' + p : p}`);
     this.edSubIc.setTexture(`ic_sub${fx ? fx.sub : 1}`);
     this.edSubTx.setText(`redoble ×${fx ? fx.sub : 1}`);
+    this.waveTx.setText(fx ? (WAVE_PRESETS[waveIdx(fx)]?.name ?? 'onda') : 'onda');
   }
 
   // ---- tactile button feedback --------------------------------------------
@@ -1138,33 +1164,19 @@ export class Game extends Scene {
     img.on('pointerdown', () => this.pressFx(img));
   }
 
-  // ---- wave drag ------------------------------------------------------------
-  // The Reddit feed scrolls at the NATIVE layer, above the web view, so free dragging
-  // inside the inline post is impossible (the gesture gets stolen mid-drag; every web
-  // lever — touch-action, preventDefault, pointer capture — failed on device). So:
-  // INLINE → touching the bar jumps straight to expanded mode, where the drag is fluid.
-  // EXPANDED → the original free 2-axis drag (Y = strength, X = speed).
-  private onBarDown(p: Phaser.Input.Pointer): void {
+  // ---- wave button ----------------------------------------------------------
+  // The wave was a free 2-axis drag bar, but dragging is hostile on a phone (the Reddit feed
+  // scrolls at the NATIVE layer above the web view and steals the gesture mid-drag). It's now
+  // a plain BUTTON: each tap moves the selected beat to the next preset.
+  private cycleWave(): void {
     if (!this.gate()) return;
     if (this.instrMenuOpen) return;
     const k = this.selectedCell;
     if (!k) return this.toast('toca un beat primero', '#ffe0a0');
-    if (this.webMode() !== 'expanded') {
-      // Unreachable in practice: inline, the DOM inlineCatcher sits over the canvas and
-      // converts taps into expand (canvas taps can't produce the trusted click Devvit needs).
-      this.toast('abre pantalla completa para editar la onda', '#ffe0a0');
-      return;
-    }
-    const fx = this.effCellFx(k);
-    this.waveDrag = { sx: p.x, sy: p.y, d0: fx.depth, r0: fx.rate, cell: k };
-  }
-  private onWaveMove(p: Phaser.Input.Pointer): void {
-    const wd = this.waveDrag;
-    if (!wd) return;
-    const depth = Phaser.Math.Clamp(wd.d0 + (wd.sy - p.y) / (this.waveBox.h * 0.8), 0, 1);
-    const rate = Phaser.Math.Clamp(wd.r0 + (p.x - wd.sx) / this.waveBox.w, 0, 1);
-    const cur = this.effCellFx(wd.cell);
-    this.setDraftFx(wd.cell, { ...cur, type: cur.type === 'none' ? 'vibrato' : cur.type, depth, rate }, true);
+    const cur = this.effCellFx(k);
+    const next = WAVE_PRESETS[(waveIdx(cur) + 1) % WAVE_PRESETS.length];
+    if (!next) return;
+    this.setDraftFx(k, { ...cur, type: cur.type === 'none' ? 'vibrato' : cur.type, depth: next.depth, rate: next.rate });
   }
 
   /** Stage a wave change for a cell. Blocks if it would cost more than you have. */
@@ -1429,31 +1441,34 @@ export class Game extends Scene {
     for (const c of this.fxChips) c.img.setAlpha(active !== null && active.depth > 0 && c.type === active.type ? 1 : 0.5);
   }
 
+  /** Draw the current preset's waveform INSIDE the wave button (right of its name). */
   private drawWave(): void {
     const g = this.waveG;
     const b = this.waveBox;
     const u = this.u;
     g.clear();
-    g.fillStyle(WAVE_FILL, 0.6).fillRoundedRect(b.x, b.y, b.w, b.h, 10 * u);
-    g.lineStyle(2 * u, INK, 0.5).strokeRoundedRect(b.x, b.y, b.w, b.h, 10 * u);
+    if (!g.visible) return; // hidden inline
+    // the pill image is the background; the graphics only draws the wave itself
     const yc = b.y + b.h / 2;
+    const x0 = b.x + 14 * u + this.waveTx.width + 10 * u;
+    const span = b.x + b.w - 12 * u - x0;
+    if (span <= 4) return;
     g.lineStyle(1.5 * u, INK, 0.25);
     g.beginPath();
-    g.moveTo(b.x + 8 * u, yc);
-    g.lineTo(b.x + b.w - 8 * u, yc);
+    g.moveTo(x0, yc);
+    g.lineTo(x0 + span, yc);
     g.strokePath();
     const k = this.selectedCell;
     if (!k) return;
     const fx = this.effCellFx(k);
     const [t] = k.split('_').map(Number);
     const color = instrumentById(this.effInstrument(t ?? 0))?.color ?? 0x3fb0ac;
-    const amp = (b.h / 2 - 6 * u) * 0.92 * fx.depth;
+    const amp = (b.h / 2 - 8 * u) * 0.92 * fx.depth;
+    if (amp <= 0) return; // "sin onda" → just the flat line
     const cycles = 0.5 + fx.rate * 5.5;
-    const x0 = b.x + 8 * u;
-    const span = b.w - 16 * u;
     g.lineStyle(3.5 * u, color, 1);
     g.beginPath();
-    const N = 64;
+    const N = 72;
     for (let i = 0; i <= N; i++) {
       const x = x0 + (span * i) / N;
       const y = yc - Math.sin((i / N) * cycles * Math.PI * 2) * amp;
@@ -1650,12 +1665,12 @@ export class Game extends Scene {
       }
     }
 
-    // RIGHT · line 2: wave bar + reset
+    // RIGHT · line 2: wave BUTTON (name + waveform, tap = next preset) + reset
     const resetCx = colR - rBtn / 2;
     const waveW = resetCx - rBtn / 2 - 6 * u - rightL;
     this.waveBox = { x: rightL, y: line2Y - waveH / 2, w: waveW, h: waveH };
-    this.waveZone.setPosition(rightL + waveW / 2, line2Y).setSize(waveW, waveH);
-    if (this.waveZone.input) this.waveZone.input.enabled = !compact;
+    this.wavePill.setVisible(!compact).setPosition(rightL + waveW / 2, line2Y).setDisplaySize(waveW, waveH);
+    this.waveTx.setVisible(!compact).setPosition(rightL + 14 * u, line2Y).setFontSize(12 * s);
     this.waveG.setVisible(!compact);
     this.resetImg.setVisible(!compact).setPosition(resetCx, line2Y).setDisplaySize(rBtn, waveH);
     this.resetText.setVisible(!compact).setPosition(resetCx, line2Y).setFontSize(20 * s);
