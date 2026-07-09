@@ -12,6 +12,7 @@
  */
 import * as Tone from 'tone';
 import {
+  BVOL_DB,
   TRACKS,
   instrumentById,
   type Instrument,
@@ -390,18 +391,26 @@ function triggerVoice(
   const noteLen = Math.max(0.045, sub > 1 ? dryLen : hasFx ? Math.max(dryLen, 0.35) : dryLen);
   const win = Math.max(noteLen, 0.1);
   const cyc = fx ? 0.5 + fx.rate * 3 : 1;
+  // Per-beat volume: this beat's resting gain. Tremolo rides on top of it (see the map below).
+  const g0 = Math.pow(10, ((fx?.vol ?? 0) * BVOL_DB) / 20);
 
   for (let k = 0; k < sub; k++) {
     const t = time + k * slot;
-    // reset this track's modulation to neutral for each hit
+    // reset this track's modulation to this beat's level / an open filter, for each hit
     gain.gain.cancelScheduledValues(t);
-    gain.gain.setValueAtTime(1, t);
+    gain.gain.setValueAtTime(g0, t);
     filter.frequency.cancelScheduledValues(t);
     filter.frequency.setValueAtTime(FILTER_OPEN, t);
 
     const base = triggerBase(inst, synth, step, t, noteLen, pitch);
     if (!hasFx || !fx) continue;
-    if (fx.type === 'tremolo') applyRamps(gain.gain, tremoloCurve(fx.depth, cyc), t, win);
+    if (fx.type === 'tremolo')
+      applyRamps(
+        gain.gain,
+        tremoloCurve(fx.depth, cyc).map((v) => v * g0),
+        t,
+        win
+      );
     else if (fx.type === 'wah') applyRamps(filter.frequency, wahCurve(fx.depth, cyc), t, win);
     else if (fx.type === 'vibrato' && base.pitched && base.baseHz > 0 && !(synth instanceof Tone.NoiseSynth))
       applyRamps(synth.frequency, vibratoCurve(base.baseHz, fx.depth, cyc), t, win);

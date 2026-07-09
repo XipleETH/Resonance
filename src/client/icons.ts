@@ -136,6 +136,9 @@ export const ICONS: Record<string, string> = {
   // Pitch nudge arrows.
   pitch_up: wrap(`<path d="M20 7 L31 21 L24 21 L24 32 L16 32 L16 21 L9 21 Z" fill="#8fd6a0"/>`),
   pitch_dn: wrap(`<path d="M20 33 L9 19 L16 19 L16 8 L24 8 L24 19 L31 19 Z" fill="#e08f88"/>`),
+  // Per-beat volume: a little speaker with + / −.
+  vol_up: wrap(`<path d="M7 16 L13 16 L20 10 L20 30 L13 24 L7 24 Z" fill="#8fd6a0"/><line x1="27" y1="14" x2="27" y2="26" stroke-width="3"/><line x1="21" y1="20" x2="33" y2="20" stroke-width="3"/>`),
+  vol_dn: wrap(`<path d="M7 16 L13 16 L20 10 L20 30 L13 24 L7 24 Z" fill="#e08f88"/><line x1="21" y1="20" x2="33" y2="20" stroke-width="3"/>`),
   // Ratchet = 1..4 beamed note-heads. The number of heads reads as the subdivision.
   sub1: wrap(`<ellipse cx="15" cy="29" rx="5" ry="3.6" fill="${INK}" stroke="none"/><line x1="19.6" y1="28" x2="19.6" y2="9"/>`),
   sub2: wrap(`<ellipse cx="10" cy="29" rx="4.6" ry="3.4" fill="${INK}" stroke="none"/><ellipse cx="26" cy="29" rx="4.6" ry="3.4" fill="${INK}" stroke="none"/><line x1="14.2" y1="28" x2="14.2" y2="10"/><line x1="30.2" y1="28" x2="30.2" y2="10"/><line x1="14.2" y1="10.5" x2="30.2" y2="10.5" stroke-width="3.2"/>`),

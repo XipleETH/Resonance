@@ -40,7 +40,7 @@ const todayStr = (now: number): string => new Date(now).toISOString().slice(0, 1
 // Store whenever ANY expression is non-default (wave, pitch, ratchet, or duration), not just
 // the wave — otherwise a beat pitched/ratcheted without a wave would lose those on save.
 const cellHasFx = (fx: TrackFx): boolean =>
-  fx.depth > 0 || fx.pitch !== 0 || fx.sub !== 1 || Math.round(fx.dur * 100) !== 50;
+  fx.depth > 0 || fx.pitch !== 0 || fx.sub !== 1 || fx.vol !== 0 || Math.round(fx.dur * 100) !== 50;
 const cellVal = (by: string, fx: TrackFx): string => (cellHasFx(fx) ? `${by};${encodeFx(fx)}` : by);
 const parseCell = (value: string): { by: string; fx: TrackFx } => {
   const i = value.indexOf(';');

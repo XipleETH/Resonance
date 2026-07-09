@@ -236,15 +236,19 @@ export type FxType = 'none' | 'vibrato' | 'tremolo' | 'wah';
 // Per-beat expression. `type/depth/rate` = the wave (LFO). `pitch` shifts the beat up/down
 // the day's scale in scale-degrees (negative = down / "backwards"). `sub` = how many rapid
 // hits the beat fires within its step (1..4 → ♩ ♪♪ ♪³ ♬, a ratchet/roll). `dur` = note length
-// 0..1 (staccato → legato). All bundle into one beat edit (one ficha), never charged apart.
-export type TrackFx = { type: FxType; depth: number; rate: number; pitch: number; sub: number; dur: number };
+// 0..1 (staccato → legato). `vol` = per-beat loudness in BVOL_DB steps (0 = as-is).
+// All bundle into one beat edit (one ficha), never charged apart.
+export type TrackFx = { type: FxType; depth: number; rate: number; pitch: number; sub: number; dur: number; vol: number };
 
 export const PITCH_MIN = -7;
 export const PITCH_MAX = 7;
 export const SUB_MIN = 1;
 export const SUB_MAX = 4;
+export const BVOL_MIN = -4; // -12 dB
+export const BVOL_MAX = 2; // +6 dB
+export const BVOL_DB = 3; // dB per step
 
-export const FLAT_FX: TrackFx = { type: 'vibrato', depth: 0, rate: 0.4, pitch: 0, sub: 1, dur: 0.5 };
+export const FLAT_FX: TrackFx = { type: 'vibrato', depth: 0, rate: 0.4, pitch: 0, sub: 1, dur: 0.5, vol: 0 };
 
 export const FX_TARGETS: readonly { type: FxType; label: string; emoji: string }[] = [
   { type: 'vibrato', label: 'Vibrato', emoji: '🌊' },
@@ -259,8 +263,9 @@ const clampInt = (n: number, lo: number, hi: number): number => {
 };
 
 export function encodeFx(fx: TrackFx): string {
-  // type:depth:rate:pitch:sub:dur — the last three are optional on read (older beats default).
-  return `${fx.type}:${Math.round(fx.depth * 100)}:${Math.round(fx.rate * 100)}:${Math.round(fx.pitch)}:${Math.round(fx.sub)}:${Math.round(fx.dur * 100)}`;
+  // type:depth:rate:pitch:sub:dur:vol — everything after `rate` is optional on read, so beats
+  // saved by an older version decode to the defaults instead of breaking.
+  return `${fx.type}:${Math.round(fx.depth * 100)}:${Math.round(fx.rate * 100)}:${Math.round(fx.pitch)}:${Math.round(fx.sub)}:${Math.round(fx.dur * 100)}:${Math.round(fx.vol)}`;
 }
 export function decodeFx(s: string | undefined): TrackFx {
   if (!s) return { ...FLAT_FX };
@@ -274,6 +279,7 @@ export function decodeFx(s: string | undefined): TrackFx {
     pitch: parts[3] === undefined ? 0 : clampInt(Number(parts[3]), PITCH_MIN, PITCH_MAX),
     sub: parts[4] === undefined ? 1 : clampInt(Number(parts[4]), SUB_MIN, SUB_MAX),
     dur: parts[5] === undefined ? 0.5 : clamp01(Number(parts[5]) / 100),
+    vol: parts[6] === undefined ? 0 : clampInt(Number(parts[6]), BVOL_MIN, BVOL_MAX),
   };
 }
 
