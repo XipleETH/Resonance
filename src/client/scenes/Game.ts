@@ -1181,14 +1181,14 @@ export class Game extends Scene {
     this.renderAll();
   }
 
-  private onTrackLabel(t: number): void {
+  private onTrackLabel(tr: number): void {
     if (!this.gate()) return;
     this.pendingPlaceCell = null; // opening the picker from the label = no bundled beat
-    if (this.selectedTrack === t) this.showMenu(!this.instrMenuOpen);
-    else {
-      this.selectedTrack = t;
-      if (this.instrMenuOpen) this.showMenu(false);
-    }
+    // One tap opens the picker. It used to just SELECT the row, so you had to tap the "+" twice.
+    // Tapping the row whose picker is already open closes it again.
+    const closing = this.selectedTrack === tr && this.instrMenuOpen;
+    this.selectedTrack = tr;
+    this.showMenu(!closing);
     this.renderAll();
   }
 
@@ -1826,7 +1826,9 @@ export class Game extends Scene {
     const licSz = Math.min(rowH * 0.92, 42 * s);
     const labelW = licSz + 12 * u;
     const left = labelW + 6 * u;
-    const cellW = (W - 10 * u - left) / STEPS;
+    // The panel's right edge is at W-8u; leave the last pad breathing room instead of letting it
+    // touch the frame.
+    const cellW = (W - 22 * u - left) / STEPS;
     this.gridBox = { left, top, cellW, rowH };
 
     this.panel.clear();
