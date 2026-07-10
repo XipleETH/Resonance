@@ -250,9 +250,10 @@ export const BVOL_DB = 3; // dB per step
 
 export const FLAT_FX: TrackFx = { type: 'vibrato', depth: 0, rate: 0.4, pitch: 0, sub: 1, dur: 0.5, vol: 0 };
 
+// The pickable effects. `tremolo` stays in FxType (and in the engine) so beats saved before it
+// was retired still decode and play — it's just no longer offered in the UI.
 export const FX_TARGETS: readonly { type: FxType; label: string; emoji: string }[] = [
   { type: 'vibrato', label: 'Vibrato', emoji: '🌊' },
-  { type: 'tremolo', label: 'Trémolo', emoji: '📢' },
   { type: 'wah', label: 'Wah', emoji: '🚿' },
 ];
 
