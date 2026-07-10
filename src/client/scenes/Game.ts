@@ -250,20 +250,25 @@ export class Game extends Scene {
   private fichaText!: Phaser.GameObjects.Text;
   private fichaSub!: Phaser.GameObjects.Text;
   private exprLabel!: Phaser.GameObjects.Text;
-  // per-beat editor (expanded only), split into two panels: LEFT = pitch (tono ▼/▲) + ratchet
-  // (repeticiones); RIGHT = wave targets (vibrato/tremolo/wah) + the wave bar.
+  // per-beat editor (expanded only), ONE row: [FX | onda] · [vol/tono disc] · [redoble] [reset]
   private edPanels!: Phaser.GameObjects.Graphics;
-  private edPitchDn!: Phaser.GameObjects.Image;
   private edPitchDnIc!: Phaser.GameObjects.Image;
-  private edPitchUp!: Phaser.GameObjects.Image;
   private edPitchUpIc!: Phaser.GameObjects.Image;
   private edPitchVal!: Phaser.GameObjects.Text;
   private edSub!: Phaser.GameObjects.Image;
   private edSubIc!: Phaser.GameObjects.Image;
   private edSubTx!: Phaser.GameObjects.Text;
-  private edVolUp!: Phaser.GameObjects.Image;
+  // The vol/tono pad is a DISC: four annular wedges split on the diagonals (up/down = volumen,
+  // left/right = tono) with only the hub free for the readout. One zone takes the taps and the
+  // wedge is resolved geometrically, so the buttons really are the ring.
+  private padG!: Phaser.GameObjects.Graphics;
+  private padHit!: Phaser.GameObjects.Zone;
+  private padCx = 0;
+  private padCy = 0;
+  private padR = 10;
+  private padRIn = 4;
+  private padPressed = -1; // wedge index being pressed (0=right,1=down,2=left,3=up)
   private edVolUpIc!: Phaser.GameObjects.Image;
-  private edVolDn!: Phaser.GameObjects.Image;
   private edVolDnIc!: Phaser.GameObjects.Image;
   private fxPill!: Phaser.GameObjects.Image; // one big button, split in 3 (vibrato|trémolo|wah)
   private fxDiv!: Phaser.GameObjects.Graphics; // its dividers + the active segment's highlight
@@ -403,31 +408,27 @@ export class Game extends Scene {
       this.fxChips.push({ img, icon, txt, type: tgt.type });
     }
 
-    // Per-beat editor (expanded only) — ONE row: tono ▼/▲ · redoble · FX(3) · onda · volumen ▲/▼.
-    // edPanels draws the row's panel; it's created after the controls, so it needs a depth or it
-    // would tint everything it sits under.
+    // Per-beat editor (expanded only) — ONE row. edPanels draws the row's panel + the disc's
+    // frame; it's created after the controls, so it needs a depth or it would tint them.
     this.edPanels = this.add.graphics().setDepth(-1);
-    // Tono lives on the pad's horizontal axis, so the up/down arrow icons are turned 90° to
-    // point ◀ (down = lower) and ▶ (up = higher); the colours keep their meaning.
-    this.edPitchDn = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
-    this.edPitchDnIc = this.add.image(0, 0, 'ic_pitch_dn').setAngle(90);
-    this.edPitchDn.on('pointerdown', () => this.nudgePitch(-1));
-    this.edPitchUp = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
-    this.edPitchUpIc = this.add.image(0, 0, 'ic_pitch_up').setAngle(90);
-    this.edPitchUp.on('pointerdown', () => this.nudgePitch(1));
-    this.edPitchVal = this.add.text(0, 0, 'tono 0', { fontFamily: CRAYON, fontSize: '12px', color: '#4a3a22' }).setOrigin(0.5);
     this.edSub = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
     this.edSubIc = this.add.image(0, 0, 'ic_sub1');
     this.edSubTx = this.add.text(0, 0, 'redoble', { fontFamily: CRAYON, fontSize: '12px', color: '#4a3a22' }).setOrigin(0, 0.5);
     this.edSub.on('pointerdown', () => this.cycleSub());
 
-    // Volume: two stacked buttons (up on top, down below) with the beat's level between them.
-    this.edVolUp = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
+    // The vol/tono DISC. The four wedges ARE the buttons: `padG` draws the ring (split on the
+    // diagonals) under the icons, and one square zone takes the taps — `onPadDown` resolves which
+    // wedge from the tap's angle + radius, so the hub stays inert for the readout.
+    this.padG = this.add.graphics().setDepth(-0.5);
+    this.padHit = this.add.zone(0, 0, 10, 10).setInteractive({ useHandCursor: true });
+    this.padHit.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPadDown(p));
     this.edVolUpIc = this.add.image(0, 0, 'ic_vol_up');
-    this.edVolUp.on('pointerdown', () => this.nudgeVol(1));
-    this.edVolDn = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
     this.edVolDnIc = this.add.image(0, 0, 'ic_vol_dn');
-    this.edVolDn.on('pointerdown', () => this.nudgeVol(-1));
+    // Tono lives on the horizontal axis, so its arrows are turned 90° to point ◀ (lower) and
+    // ▶ (higher); the colours keep their meaning (green = more, red = less).
+    this.edPitchDnIc = this.add.image(0, 0, 'ic_pitch_dn').setAngle(90);
+    this.edPitchUpIc = this.add.image(0, 0, 'ic_pitch_up').setAngle(90);
+    this.edPitchVal = this.add.text(0, 0, 'tono 0', { fontFamily: CRAYON, fontSize: '12px', color: '#4a3a22' }).setOrigin(0.5);
 
     // Wave BUTTON: tap cycles the presets. Pill first, then the waveform on top, then the name.
     this.wavePill = this.add.image(0, 0, 'cb_pill').setTint(WAVE_FILL).setInteractive({ useHandCursor: true });
@@ -525,12 +526,9 @@ export class Game extends Scene {
     this.addPress(this.saveImg, this.saveIcon, this.saveText);
     this.addPress(this.ppImg, this.ppIcon);
     this.addPress(this.resetImg, this.resetText);
-    this.addPress(this.edPitchDn, this.edPitchDnIc);
-    this.addPress(this.edPitchUp, this.edPitchUpIc);
     this.addPress(this.edSub, this.edSubIc, this.edSubTx);
-    this.addPress(this.edVolUp, this.edVolUpIc);
-    this.addPress(this.edVolDn, this.edVolDnIc);
     this.addPress(this.wavePill, this.waveTx);
+    // the disc's wedges get their feedback from onPadDown (icon dip + wedge highlight)
     for (const c of this.fxChips) this.addPress(c.img, c.icon, c.txt);
     for (const li of this.labelIcons) this.addPress(li);
     for (const row of this.cells) for (const cell of row) this.addPress(cell);
@@ -1162,6 +1160,55 @@ export class Game extends Scene {
     const sub = cur.sub >= SUB_MAX ? SUB_MIN : cur.sub + 1;
     this.setDraftFx(k, { ...cur, sub });
   }
+  /**
+   * The disc's wedges are resolved geometrically: reject the hub and anything outside the ring,
+   * then map the tap's angle to one of the four quadrants (split on the diagonals).
+   *   0 = ▶ tono+   1 = ▼ vol−   2 = ◀ tono−   3 = ▲ vol+
+   */
+  private onPadDown(p: Phaser.Input.Pointer): void {
+    if (this.instrMenuOpen) return;
+    const dx = p.worldX - this.padCx;
+    const dy = p.worldY - this.padCy;
+    const d = Math.hypot(dx, dy);
+    if (d < this.padRIn || d > this.padR) return; // hub (readout) and outside are inert
+    const deg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+    const q = deg >= 315 || deg < 45 ? 0 : deg < 135 ? 1 : deg < 225 ? 2 : 3;
+    this.padPressed = q;
+    this.time.delayedCall(170, () => {
+      this.padPressed = -1;
+      this.drawPad();
+    });
+    this.pressFx([this.edPitchUpIc, this.edVolDnIc, this.edPitchDnIc, this.edVolUpIc][q]);
+    if (q === 0) this.nudgePitch(1);
+    else if (q === 1) this.nudgeVol(-1);
+    else if (q === 2) this.nudgePitch(-1);
+    else this.nudgeVol(1);
+    this.drawPad();
+  }
+
+  /** The disc: four annular wedges (the buttons) split on the diagonals, hub left free. */
+  private drawPad(): void {
+    const g = this.padG;
+    g.clear();
+    if (!g.visible) return;
+    const { padCx: cx, padCy: cy, padR: R, padRIn: rIn } = this;
+    const N = 14;
+    for (let q = 0; q < 4; q++) {
+      const a0 = -Math.PI / 4 + (q * Math.PI) / 2;
+      const pts: Phaser.Math.Vector2[] = [];
+      for (let i = 0; i <= N; i++) {
+        const a = a0 + (Math.PI / 2) * (i / N);
+        pts.push(new Phaser.Math.Vector2(cx + Math.cos(a) * R, cy + Math.sin(a) * R));
+      }
+      for (let i = N; i >= 0; i--) {
+        const a = a0 + (Math.PI / 2) * (i / N);
+        pts.push(new Phaser.Math.Vector2(cx + Math.cos(a) * rIn, cy + Math.sin(a) * rIn));
+      }
+      g.fillStyle(this.padPressed === q ? 0xffe6a7 : 0xf0e7d0, 1).fillPoints(pts, true);
+      g.lineStyle(2 * this.s, INK, 0.5).strokePoints(pts, true);
+    }
+  }
+
   private nudgeVol(delta: number): void {
     if (!this.gate()) return;
     const k = this.selectedCell;
@@ -1177,18 +1224,15 @@ export class Game extends Scene {
     const fx = k ? this.effCellFx(k) : null;
     const a = fx ? 1 : 0.4;
     for (const o of [
-      this.edPitchDn,
       this.edPitchDnIc,
-      this.edPitchUp,
       this.edPitchUpIc,
       this.edPitchVal,
       this.edSub,
       this.edSubIc,
       this.edSubTx,
-      this.edVolUp,
       this.edVolUpIc,
-      this.edVolDn,
       this.edVolDnIc,
+      this.padG,
       this.wavePill,
       this.waveTx,
       this.waveG,
@@ -1196,6 +1240,7 @@ export class Game extends Scene {
       this.fxDiv,
     ])
       o.setAlpha(a);
+    this.drawPad();
     // The hub shows ONE value: whichever axis was moved last (tono ◀▶ or volumen ▲▼).
     const n = this.padShow === 'vol' ? (fx ? fx.vol : 0) : fx ? fx.pitch : 0;
     const nStr = n > 0 ? `+${n}` : `${n}`;
@@ -1658,7 +1703,7 @@ export class Game extends Scene {
     // (tall fullscreen or short feed card). ----
     const by = H - 40 * s; // fichas / play / rank / save row (center y)
     const pillH = 34 * s;
-    const edRowH = 76 * s; // the ONE editor row; also the diameter of the centre pad
+    const edRowH = 58 * s; // the ONE editor row — the flat bars keep this height
     const rowY = by - pillH / 2 - 12 * s - edRowH / 2;
     const exprTop = rowY - edRowH / 2 - 16 * s; // label above the row
 
@@ -1706,22 +1751,27 @@ export class Game extends Scene {
     const barH = edRowH * 0.82; // the flat buttons (FX / onda / redoble / reset)
 
     // The pad is a disc pinned to the EXACT centre of the row; the wave options fill the space
-    // to its left, redoble + reset the space to its right.
+    // to its left, redoble + reset the space to its right. It reaches a little past the bars, so
+    // the panel gets extra vertical padding rather than the bars getting taller.
     const rowMid = (rowL + rowR) / 2;
-    const padR = edRowH / 2; // a bit bigger than the bars beside it
-    const padW = padR * 2 + 4 * s;
+    const padPad = 9 * s;
+    this.padCx = rowMid;
+    this.padCy = rowY;
+    this.padR = edRowH * 0.6;
+    this.padRIn = this.padR * 0.36; // the hub, left free for the readout
+    const padW = this.padR * 2 + 4 * s;
     const leftW = rowMid - padW / 2 - gap - rowL;
     const rightL = rowMid + padW / 2 + gap;
     const rightW = rowR - rightL;
 
-    // the row's panel + the pad's circular frame
+    // the row's panel, plus the disc's frame drawn BEHIND the wedges
     this.edPanels.clear().setVisible(!compact);
     if (!compact) {
       this.edPanels.fillStyle(this.theme.panel, 0.4).lineStyle(2 * s, INK, 0.28);
-      this.edPanels.fillRoundedRect(rowL - 6 * u, rowTop - 6 * s, rowR - rowL + 12 * u, edRowH + 12 * s, 10 * s);
-      this.edPanels.strokeRoundedRect(rowL - 6 * u, rowTop - 6 * s, rowR - rowL + 12 * u, edRowH + 12 * s, 10 * s);
-      this.edPanels.fillStyle(WAVE_FILL, 0.55).fillCircle(rowMid, rowY, padR);
-      this.edPanels.lineStyle(2.5 * s, INK, 0.5).strokeCircle(rowMid, rowY, padR);
+      this.edPanels.fillRoundedRect(rowL - 6 * u, rowTop - padPad, rowR - rowL + 12 * u, edRowH + padPad * 2, 10 * s);
+      this.edPanels.strokeRoundedRect(rowL - 6 * u, rowTop - padPad, rowR - rowL + 12 * u, edRowH + padPad * 2, 10 * s);
+      this.edPanels.fillStyle(WAVE_FILL, 0.7).fillCircle(rowMid, rowY, this.padR + 2.5 * s);
+      this.edPanels.lineStyle(2.5 * s, INK, 0.5).strokeCircle(rowMid, rowY, this.padR + 2.5 * s);
     }
 
     // ---- left: the wave options (effect type, then preset) ----
@@ -1759,22 +1809,21 @@ export class Game extends Scene {
     this.waveTx.setVisible(!compact && waveName).setPosition(x + 10 * u, rowY).setFontSize(11 * s);
     this.waveG.setVisible(!compact);
 
-    // ---- centre: the disc. volumen ▲/▼ on the vertical axis, tono ◀/▶ on the horizontal one,
-    // and a hub that reads out whichever of the two you moved last. ----
-    const bSz = padR * 0.68; // chunky buttons — most of the disc is tappable
-    const off = padR * 0.62; // distance from the hub to each button's centre
-    const padIc = bSz * 0.66;
-    const hub = 2 * (off - bSz / 2); // free diameter left in the middle
-    this.padLong = hub > 52 * s;
-    this.edVolUp.setVisible(!compact).setPosition(rowMid, rowY - off).setDisplaySize(bSz, bSz);
-    this.edVolUpIc.setVisible(!compact).setPosition(rowMid, rowY - off).setDisplaySize(padIc, padIc);
-    this.edVolDn.setVisible(!compact).setPosition(rowMid, rowY + off).setDisplaySize(bSz, bSz);
-    this.edVolDnIc.setVisible(!compact).setPosition(rowMid, rowY + off).setDisplaySize(padIc, padIc);
-    this.edPitchDn.setVisible(!compact).setPosition(rowMid - off, rowY).setDisplaySize(bSz, bSz);
-    this.edPitchDnIc.setVisible(!compact).setPosition(rowMid - off, rowY).setDisplaySize(padIc, padIc);
-    this.edPitchUp.setVisible(!compact).setPosition(rowMid + off, rowY).setDisplaySize(bSz, bSz);
-    this.edPitchUpIc.setVisible(!compact).setPosition(rowMid + off, rowY).setDisplaySize(padIc, padIc);
-    this.edPitchVal.setVisible(!compact).setPosition(rowMid, rowY).setFontSize(Math.min(11 * s, hub * 0.42));
+    // ---- centre: the disc. The four wedges ARE the buttons (▲/▼ = volumen, ◀/▶ = tono); the
+    // hub in the middle reads out whichever of the two you moved last. ----
+    const band = this.padR - this.padRIn; // the wedge band's thickness
+    const mid = this.padRIn + band / 2; // where each wedge's icon sits
+    const padIc = band * 0.62;
+    const hub = this.padRIn * 2;
+    this.padLong = hub > 56 * s;
+    this.padG.setVisible(!compact);
+    this.padHit.setPosition(rowMid, rowY).setSize(this.padR * 2, this.padR * 2);
+    if (this.padHit.input) this.padHit.input.enabled = !compact;
+    this.edVolUpIc.setVisible(!compact).setPosition(rowMid, rowY - mid).setDisplaySize(padIc, padIc);
+    this.edVolDnIc.setVisible(!compact).setPosition(rowMid, rowY + mid).setDisplaySize(padIc, padIc);
+    this.edPitchDnIc.setVisible(!compact).setPosition(rowMid - mid, rowY).setDisplaySize(padIc, padIc);
+    this.edPitchUpIc.setVisible(!compact).setPosition(rowMid + mid, rowY).setDisplaySize(padIc, padIc);
+    this.edPitchVal.setVisible(!compact).setPosition(rowMid, rowY).setFontSize(Math.min(11 * s, hub * 0.44));
 
     // ---- right: redoble + reset, centred in what's left ----
     const wSub = Math.min(rightW * 0.55, 100 * s);
