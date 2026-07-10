@@ -43,6 +43,7 @@ import {
   type RankingsResponse,
   type TrackFx,
 } from '../../shared/jam';
+import { getLang, instrLabel, noteName, setLang, t, type Lang } from '../i18n';
 
 const KRAFT = '#cdb083';
 const INK = 0x3a2f22;
@@ -51,13 +52,15 @@ const CRAYON = '"Gochi Hand", "Comic Sans MS", "Marker Felt", "Segoe Print", cur
 
 // The wave used to be a 2-axis drag bar. Dragging is hostile on a phone (the feed steals the
 // gesture) so it's now a BUTTON that cycles these presets — the waveform still draws inside it.
-const WAVE_PRESETS: readonly { name: string; depth: number; rate: number }[] = [
-  { name: 'sin onda', depth: 0, rate: 0.4 },
-  { name: 'suave', depth: 0.35, rate: 0.3 },
-  { name: 'media', depth: 0.6, rate: 0.5 },
-  { name: 'fuerte', depth: 0.92, rate: 0.6 },
-  { name: 'rápida', depth: 0.7, rate: 0.95 },
+const WAVE_PRESETS: readonly { key: 'wNone' | 'wSoft' | 'wMid' | 'wStrong' | 'wFast'; depth: number; rate: number }[] = [
+  { key: 'wNone', depth: 0, rate: 0.4 },
+  { key: 'wSoft', depth: 0.35, rate: 0.3 },
+  { key: 'wMid', depth: 0.6, rate: 0.5 },
+  { key: 'wStrong', depth: 0.92, rate: 0.6 },
+  { key: 'wFast', depth: 0.7, rate: 0.95 },
 ];
+/** The wave an effect button turns on when the beat is still flat (index 1 = the softest). */
+const FIRST_WAVE = 1;
 /** Which preset a beat's wave is closest to (older beats came from the free drag). */
 const waveIdx = (fx: TrackFx): number => {
   let best = 0;
@@ -106,7 +109,6 @@ function themeFor(day: string): Theme {
 // day's palette before the init fetch returns (avoids a flash of base colors on load).
 const clientDay = (): string => new Date().toISOString().slice(0, 10);
 const key = (t: number, s: number): string => `${t}_${s}`;
-const keyText: Record<string, string> = { C: 'DO', D: 'RE', E: 'MI', F: 'FA', G: 'SOL', A: 'LA', B: 'SI' };
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   const rr = Math.min(r, w / 2, h / 2);
@@ -284,6 +286,10 @@ export class Game extends Scene {
   private rankIcon!: Phaser.GameObjects.Image;
   private clockIcon!: Phaser.GameObjects.Image;
   private dateText!: Phaser.GameObjects.Text;
+  private setImg!: Phaser.GameObjects.Image;
+  private setIcon!: Phaser.GameObjects.Image;
+  private setBtn: HTMLButtonElement | null = null;
+  private setOverlay: HTMLDivElement | null = null;
   private rankBtn: HTMLButtonElement | null = null;
   private rankOverlay: HTMLDivElement | null = null;
   private fsImg!: Phaser.GameObjects.Image;
@@ -477,7 +483,7 @@ export class Game extends Scene {
     this.saveImg.on('pointerdown', () => {
       if (this.gate()) void this.commit();
     });
-    this.saveText = this.add.text(0, 0, 'GUARDAR', { fontFamily: CRAYON, fontSize: '16px', color: '#fff9ec' }).setOrigin(0.5);
+    this.saveText = this.add.text(0, 0, t('save'), { fontFamily: CRAYON, fontSize: '16px', color: '#fff9ec' }).setOrigin(0.5);
     this.saveIcon = this.add.image(0, 0, 'ic_save');
     this.fsImg = this.add.image(0, 0, 'cb_pill').setTint(0xf2c14e);
     this.fsIcon = this.add.image(0, 0, 'ic_fs');
@@ -488,10 +494,12 @@ export class Game extends Scene {
     this.ppIcon = this.add.image(0, 0, 'ic_play');
     this.rankImg = this.add.image(0, 0, 'cb_pill').setTint(0xe8cf9a);
     this.rankIcon = this.add.image(0, 0, 'ic_rank');
+    this.setImg = this.add.image(0, 0, 'cb_pill').setTint(0xd9c9a4);
+    this.setIcon = this.add.image(0, 0, 'ic_gear');
     this.clockIcon = this.add.image(0, 0, 'ic_clock');
     this.dateText = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '11px', color: '#6b5636' }).setOrigin(1, 0.5);
 
-    this.footer = this.add.text(0, 0, 'nadie montó esto — lo hizo la comunidad', { fontFamily: CRAYON, fontSize: '11px', color: '#8a7a58' }).setOrigin(0.5);
+    this.footer = this.add.text(0, 0, t('footer'), { fontFamily: CRAYON, fontSize: '11px', color: '#8a7a58' }).setOrigin(0.5);
     this.toastText = this.add.text(0, 0, '', { fontFamily: CRAYON, fontSize: '15px', color: '#ffd1d1' }).setOrigin(0.5).setAlpha(0);
 
     this.menuDim = this.add.rectangle(0, 0, 10, 10, 0x201a12, 0.5).setOrigin(0.5).setDepth(50);
@@ -536,6 +544,7 @@ export class Game extends Scene {
     // fs + rank are DOM-overlay buttons; their pills dip from the DOM pointerdown (setupDomButtons).
     this.fsImg.setData('face', [this.fsIcon]);
     this.rankImg.setData('face', [this.rankIcon]);
+    this.setImg.setData('face', [this.setIcon]);
 
     onStep((step) => this.onStepVisual(step));
     this.setupDomButtons();
@@ -725,7 +734,12 @@ export class Game extends Scene {
     this.rankBtn = make();
     this.rankBtn.addEventListener('click', () => void this.openRanking());
     this.rankBtn.addEventListener('pointerdown', () => this.pressFx(this.rankImg));
+    // Settings (DOM too, so it clicks reliably inline where the catcher covers the canvas).
+    this.setBtn = make();
+    this.setBtn.addEventListener('click', () => this.openSettings());
+    this.setBtn.addEventListener('pointerdown', () => this.pressFx(this.setImg));
     this.setupRankingOverlay();
+    this.setupSettingsOverlay();
   }
 
   /** Build the ranking/profile modal once (DOM — avatars, lists, crayon styling). */
@@ -762,7 +776,7 @@ export class Game extends Scene {
         #rk-ov .rk-me .rk-av,#rk-ov .rk-me .rk-fb{width:52px;height:52px;font-size:22px}
       </style>
       <div class="rk-card">
-        <div class="rk-top"><span class="rk-title">RANKING</span><div class="rk-x" id="rk-close">✕</div></div>
+        <div class="rk-top"><span class="rk-title" id="rk-title">RANKING</span><div class="rk-x" id="rk-close">✕</div></div>
         <div id="rk-body">cargando…</div>
       </div>`;
     document.body.appendChild(ov);
@@ -772,12 +786,92 @@ export class Game extends Scene {
     ov.addEventListener('click', (e) => { if (e.target === ov) close(); }); // click backdrop to close
   }
 
+  /**
+   * Settings. Language is the only option for now (the button/app guide comes later); flipping it
+   * re-labels everything in place — `layout()` re-runs so the pills resize around their new text.
+   */
+  private setupSettingsOverlay(): void {
+    if (this.setOverlay) return;
+    const ov = document.createElement('div');
+    ov.id = 'st-ov';
+    ov.style.display = 'none';
+    ov.innerHTML = `
+      <style>
+        #st-ov{position:fixed;inset:0;z-index:21;background:rgba(32,26,18,.55);
+          font-family:'Gochi Hand','Comic Sans MS',cursive;overflow:auto;
+          -webkit-tap-highlight-color:transparent}
+        #st-ov .st-card{max-width:420px;margin:8vh auto;background:#e7d6ac;border:3px solid #3a2f22;
+          border-radius:18px;padding:14px 16px 20px;color:#3a2f22}
+        #st-ov .st-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+        #st-ov .st-title{font-size:26px;color:#e2574c;transform:rotate(-2deg)}
+        #st-ov .st-x{font-size:22px;background:#f1b0a0;border:2px solid #3a2f22;border-radius:50%;
+          width:34px;height:34px;line-height:30px;text-align:center;cursor:pointer}
+        #st-ov .st-sec{font-size:18px;color:#4a3a22;margin:6px 2px 8px}
+        #st-ov .st-langs{display:flex;gap:10px}
+        #st-ov .st-lang{flex:1;font-family:inherit;font-size:19px;padding:10px 6px;cursor:pointer;
+          background:#f1e3bf;border:2.5px solid #3a2f22;border-radius:14px;color:#3a2f22}
+        #st-ov .st-lang.on{background:#8fd6a0}
+      </style>
+      <div class="st-card">
+        <div class="st-top"><span class="st-title" id="st-title"></span><div class="st-x" id="st-close">✕</div></div>
+        <div class="st-sec" id="st-langlabel"></div>
+        <div class="st-langs">
+          <button class="st-lang" id="st-es" type="button">Español</button>
+          <button class="st-lang" id="st-en" type="button">English</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    this.setOverlay = ov;
+    const close = (): void => {
+      ov.style.display = 'none';
+    };
+    ov.querySelector('#st-close')?.addEventListener('click', close);
+    ov.addEventListener('click', (e) => {
+      if (e.target === ov) close();
+    });
+    const pick = (l: Lang): void => {
+      if (getLang() === l) return;
+      setLang(l);
+      this.applyLang();
+      this.paintSettings();
+    };
+    ov.querySelector('#st-es')?.addEventListener('click', () => pick('es'));
+    ov.querySelector('#st-en')?.addEventListener('click', () => pick('en'));
+  }
+
+  private paintSettings(): void {
+    const ov = this.setOverlay;
+    if (!ov) return;
+    const set = (id: string, txt: string): void => {
+      const el = ov.querySelector(id);
+      if (el) el.textContent = txt;
+    };
+    set('#st-title', t('settings'));
+    set('#st-langlabel', t('language'));
+    ov.querySelector('#st-es')?.classList.toggle('on', getLang() === 'es');
+    ov.querySelector('#st-en')?.classList.toggle('on', getLang() === 'en');
+  }
+
+  private openSettings(): void {
+    if (!this.setOverlay) return;
+    this.paintSettings();
+    this.setOverlay.style.display = 'block';
+  }
+
+  /** Re-label everything after a language change (pill widths depend on their text). */
+  private applyLang(): void {
+    this.footer.setText(t('footer'));
+    this.layout(); // re-measures the pills, then renderAll() re-writes every string
+  }
+
   private async openRanking(): Promise<void> {
     const ov = this.rankOverlay;
     if (!ov) return;
     ov.style.display = 'block';
+    const ttl = ov.querySelector('#rk-title');
+    if (ttl) ttl.textContent = t('rankTitle');
     const body = ov.querySelector('#rk-body');
-    if (body) body.textContent = 'cargando…';
+    if (body) body.textContent = t('loading');
     try {
       const [rk, pf] = await Promise.all([
         fetch('/api/jam/rankings').then((r) => r.json() as Promise<RankingsResponse>),
@@ -785,7 +879,7 @@ export class Game extends Scene {
       ]);
       if (body) body.innerHTML = this.rankingHtml(rk, pf);
     } catch {
-      if (body) body.textContent = 'no se pudo cargar el ranking';
+      if (body) body.textContent = t('rankLoadErr');
     }
   }
 
@@ -801,28 +895,28 @@ export class Game extends Scene {
       return `<span class="rk-avw${big ? ' rk-me' : ''}"><span class="rk-fb" style="background:${col}">${init}</span>${img}</span>`;
     };
     const list = (title: string, rows: RankingsResponse['placed'], unit: string): string => {
-      if (!rows.length) return `<div class="rk-sec">${title}</div><div class="rk-most">aún nadie 🙂</div>`;
+      if (!rows.length) return `<div class="rk-sec">${title}</div><div class="rk-most">${t('rankNobody')}</div>`;
       const items = rows
         .slice(0, 5)
         .map((e, i) => `<div class="rk-row"><span class="rk-rn">${i + 1}</span>${avatar(e.username, e.avatar)}<span class="rk-nm">${esc(e.username)}</span><span class="rk-vl">${e.value} ${unit}</span></div>`)
         .join('');
       return `<div class="rk-sec">${title}</div>${items}`;
     };
-    const favLabel = pf.favInstrument ? (instrumentById(pf.favInstrument)?.label ?? pf.favInstrument) : '—';
-    const topLabel = rk.topInstrument ? (instrumentById(rk.topInstrument.id)?.label ?? rk.topInstrument.id) : '—';
+    const favLabel = pf.favInstrument ? (instrLabel(instrumentById(pf.favInstrument)) || pf.favInstrument) : '—';
+    const topLabel = rk.topInstrument ? (instrLabel(instrumentById(rk.topInstrument.id)) || rk.topInstrument.id) : '—';
     const me = `
       <div class="rk-me">
         ${avatar(pf.username, pf.avatar, true)}
         <div class="rk-stats"><b>${esc(pf.username)}</b><br>
-        ${pf.placed} puestos · ${pf.removed} quitados<br>
-        racha ${pf.streak} (mejor ${pf.best}) · fav: ${esc(favLabel)}</div>
+        ${pf.placed} ${t('rankMePut')} · ${pf.removed} ${t('rankMeRemoved')}<br>
+        ${t('rankMeStreak')} ${pf.streak} (${t('rankMeBest')} ${pf.best}) · ${t('rankMeFav')}: ${esc(favLabel)}</div>
       </div>`;
     return (
       me +
-      `<div class="rk-most">🎛 sonido más usado por todos: <b>${esc(topLabel)}</b></div>` +
-      list('más beats puestos', rk.placed, '') +
-      list('más beats quitados', rk.removed, '') +
-      list('racha más larga', rk.streak, 'días')
+      `<div class="rk-most">${t('rankTopSound')} <b>${esc(topLabel)}</b></div>` +
+      list(t('rankPlaced'), rk.placed, '') +
+      list(t('rankRemoved'), rk.removed, '') +
+      list(t('rankStreak'), rk.streak, t('rankDays'))
     );
   }
 
@@ -858,7 +952,7 @@ export class Game extends Scene {
     try {
       requestExpandedMode(ev, 'game');
     } catch {
-      this.toast('no se pudo abrir pantalla completa', '#ffe0a0');
+      this.toast(t('fsErr'), '#ffe0a0');
     }
   }
 
@@ -932,6 +1026,8 @@ export class Game extends Scene {
     put(this.fsBtn, fb.x, fb.y, fb.width, fb.height, !this.instrMenuOpen);
     const rb = this.rankImg.getBounds();
     put(this.rankBtn, rb.x, rb.y, rb.width, rb.height, !this.instrMenuOpen);
+    const sb = this.setImg.getBounds();
+    put(this.setBtn, sb.x, sb.y, sb.width, sb.height, !this.instrMenuOpen);
     // Inline: the catcher covers the whole canvas so any tap can expand. Expanded: hidden,
     // so the canvas is interacted with directly (wave drag, etc.).
     put(this.inlineCatcher, 0, 0, this.scale.width, this.scale.height, this.webMode() !== 'expanded' && !this.instrMenuOpen);
@@ -967,7 +1063,7 @@ export class Game extends Scene {
       m.id = id;
       const inst = instrumentById(id);
       m.icon.setTexture(inst ? `ic_${id}` : 'ic_add');
-      m.txt.setText(inst ? inst.label : '');
+      m.txt.setText(inst ? instrLabel(inst) : '');
       m.img.setTint(lighten(inst?.color ?? 0x999999, 0.35));
     }
   }
@@ -1136,16 +1232,20 @@ export class Game extends Scene {
   private pickFxTarget(type: FxType): void {
     if (!this.gate()) return;
     const k = this.selectedCell;
-    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
+    if (!k) return this.toast(t('tapBeatFirst'), '#ffe0a0');
     const cur = this.effCellFx(k);
-    this.setDraftFx(k, { ...cur, type });
+    // On a flat beat, picking an effect did nothing (depth 0 = no wave, so nothing was heard
+    // and nothing lit up). Turn the first wave on for them.
+    const w = WAVE_PRESETS[FIRST_WAVE];
+    const wave = cur.depth > 0 || !w ? { depth: cur.depth, rate: cur.rate } : { depth: w.depth, rate: w.rate };
+    this.setDraftFx(k, { ...cur, ...wave, type });
   }
 
   // ---- per-beat pitch / ratchet (redoble) ---------------------------------
   private nudgePitch(delta: number): void {
     if (!this.gate()) return;
     const k = this.selectedCell;
-    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
+    if (!k) return this.toast(t('tapBeatFirst'), '#ffe0a0');
     const cur = this.effCellFx(k);
     const pitch = Phaser.Math.Clamp(cur.pitch + delta, PITCH_MIN, PITCH_MAX);
     this.padShow = 'pitch'; // the hub now reads out tono (even if we hit the clamp)
@@ -1155,7 +1255,7 @@ export class Game extends Scene {
   private cycleSub(): void {
     if (!this.gate()) return;
     const k = this.selectedCell;
-    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
+    if (!k) return this.toast(t('tapBeatFirst'), '#ffe0a0');
     const cur = this.effCellFx(k);
     const sub = cur.sub >= SUB_MAX ? SUB_MIN : cur.sub + 1;
     this.setDraftFx(k, { ...cur, sub });
@@ -1212,7 +1312,7 @@ export class Game extends Scene {
   private nudgeVol(delta: number): void {
     if (!this.gate()) return;
     const k = this.selectedCell;
-    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
+    if (!k) return this.toast(t('tapBeatFirst'), '#ffe0a0');
     const cur = this.effCellFx(k);
     const vol = Phaser.Math.Clamp(cur.vol + delta, BVOL_MIN, BVOL_MAX);
     this.padShow = 'vol'; // the hub now reads out volumen (even if we hit the clamp)
@@ -1244,11 +1344,12 @@ export class Game extends Scene {
     // The hub shows ONE value: whichever axis was moved last (tono ◀▶ or volumen ▲▼).
     const n = this.padShow === 'vol' ? (fx ? fx.vol : 0) : fx ? fx.pitch : 0;
     const nStr = n > 0 ? `+${n}` : `${n}`;
-    const word = this.padShow === 'vol' ? 'vol' : 'tono';
+    const word = this.padShow === 'vol' ? t('vol') : t('tono');
     this.edPitchVal.setText(this.padLong ? `${word} ${nStr}` : `${word[0]}${nStr}`);
     this.edSubIc.setTexture(`ic_sub${fx ? fx.sub : 1}`);
     this.edSubTx.setText(`×${fx ? fx.sub : 1}`);
-    this.waveTx.setText(fx ? (WAVE_PRESETS[waveIdx(fx)]?.name ?? 'onda') : 'onda');
+    const wk = fx ? WAVE_PRESETS[waveIdx(fx)]?.key : undefined;
+    this.waveTx.setText(wk ? t(wk) : t('onda'));
   }
 
   // ---- tactile button feedback --------------------------------------------
@@ -1283,7 +1384,7 @@ export class Game extends Scene {
     if (!this.gate()) return;
     if (this.instrMenuOpen) return;
     const k = this.selectedCell;
-    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
+    if (!k) return this.toast(t('tapBeatFirst'), '#ffe0a0');
     const cur = this.effCellFx(k);
     const next = WAVE_PRESETS[(waveIdx(cur) + 1) % WAVE_PRESETS.length];
     if (!next) return;
@@ -1322,7 +1423,7 @@ export class Game extends Scene {
 
   private resetSelectedWave(): void {
     const k = this.selectedCell;
-    if (!k) return this.toast('toca un beat primero', '#ffe0a0');
+    if (!k) return this.toast(t('tapBeatFirst'), '#ffe0a0');
     this.setDraftFx(k, { ...FLAT_FX });
   }
   private clearDraft(): void {
@@ -1333,7 +1434,7 @@ export class Game extends Scene {
     this.draftTempo = 0;
     this.refreshEngine();
     this.renderAll();
-    this.toast('borrador vaciado', '#ffe0a0');
+    this.toast(t('draftCleared'), '#ffe0a0');
   }
 
   private refreshEngine(): void {
@@ -1379,10 +1480,10 @@ export class Game extends Scene {
       const data = (await res.json()) as JamCommitResponse;
       if (data.ok) {
         this.energy = data.energy;
-        this.toast('¡Enviado! 🎶', '#b6ffb6');
-      } else this.toast(data.message ?? 'Error', '#ffd1d1');
+        this.toast(t('sent'), '#b6ffb6');
+      } else this.toast(data.message ?? t('error'), '#ffd1d1');
     } catch {
-      this.toast('Sin conexión (guardado local)', '#ffe0a0');
+      this.toast(t('offline'), '#ffe0a0');
     }
     this.refreshEngine();
     this.renderAll();
@@ -1437,14 +1538,15 @@ export class Game extends Scene {
     const rows = Math.ceil(this.menuChips.length / cols);
     const px = 22 * u;
     const pw = W - 44 * u;
-    const chH = 36 * s;
-    const ph = 56 * s + rows * (chH + 8 * s);
+    // The picker is where the sound NAMES live now, so give the chips + type room to breathe.
+    const chH = 46 * s;
+    const ph = 62 * s + rows * (chH + 8 * s);
     const py = (H - ph) / 2;
     this.menuPanel.clear();
     this.menuPanel.fillStyle(0xf1e3bf, 0.98).fillRoundedRect(px, py, pw, ph, 18 * s);
     this.menuPanel.lineStyle(3 * s, INK, 0.85).strokeRoundedRect(px, py, pw, ph, 18 * s);
     const sel = this.selectedTrack;
-    this.menuTitle.setText(sel >= 0 ? `sonido para la fila ${sel + 1}` : 'elige un sonido').setPosition(W / 2, py + 24 * s).setFontSize(14 * s);
+    this.menuTitle.setText(sel >= 0 ? `${t('menuRow')} ${sel + 1}` : t('menuPick')).setPosition(W / 2, py + 26 * s).setFontSize(16 * s);
     const cw = (pw - 24 * u) / cols;
     const curId = sel >= 0 ? this.effInstrument(sel) : '';
     for (let i = 0; i < this.menuChips.length; i++) {
@@ -1455,13 +1557,13 @@ export class Game extends Scene {
       const col = i % cols;
       const rowi = Math.floor(i / cols);
       const cx = px + 12 * u + col * cw + cw / 2;
-      const cy = py + 48 * s + rowi * (chH + 8 * s) + chH / 2;
+      const cy = py + 54 * s + rowi * (chH + 8 * s) + chH / 2;
       const innerW = cw - 8 * u;
       m.img.setPosition(cx, cy).setDisplaySize(innerW, chH);
-      const mIcSz = chH * 0.66;
-      const mLeft = cx - innerW / 2 + 7 * u;
+      const mIcSz = chH * 0.7;
+      const mLeft = cx - innerW / 2 + 6 * u;
       m.icon.setPosition(mLeft + mIcSz / 2, cy).setDisplaySize(mIcSz, mIcSz);
-      m.txt.setPosition(mLeft + mIcSz + 4 * u, cy).setFontSize(11 * s);
+      m.txt.setPosition(mLeft + mIcSz + 4 * u, cy).setFontSize(14 * s);
     }
   }
 
@@ -1488,7 +1590,7 @@ export class Game extends Scene {
 
   private renderSave(): void {
     const cost = this.pendingCost();
-    this.saveText.setText(cost > 0 ? `GUARDAR (${cost})` : 'GUARDAR');
+    this.saveText.setText(cost > 0 ? `${t('save')} (${cost})` : t('save'));
     this.saveImg.setAlpha(cost > 0 ? 1 : 0.55);
   }
 
@@ -1507,13 +1609,14 @@ export class Game extends Scene {
     else img.setTint(color).setAlpha(0.16);
   }
 
-  private renderLabel(t: number): void {
-    const label = this.labels[t];
-    const icon = this.labelIcons[t];
+  private renderLabel(tr: number): void {
+    const label = this.labels[tr];
+    const icon = this.labelIcons[tr];
     if (!label || !icon) return;
-    const inst = instrumentById(this.effInstrument(t));
-    const sel = this.selectedTrack === t;
-    label.setText(inst ? inst.label : 'añadir');
+    const inst = instrumentById(this.effInstrument(tr));
+    const sel = this.selectedTrack === tr;
+    // The name is hidden in the board (the icon carries it); it shows in the sound picker.
+    label.setText(inst ? instrLabel(inst) : t('add'));
     label.setColor(sel ? '#e2574c' : inst ? '#4a3a22' : '#b9a888');
     icon.setTexture(inst ? `ic_${inst.id}` : 'ic_add').setAlpha(inst ? 1 : 0.5);
   }
@@ -1532,21 +1635,21 @@ export class Game extends Scene {
 
   private renderHeader(): void {
     const m = this.state.meta;
-    this.dayText.setText(`clave de ${keyText[m.key] ?? m.key} menor`); // top-left
+    this.dayText.setText(`${t('keyOf')} ${noteName(m.key)} ${t('minor')}`); // top-left
     this.dateText.setText(m.day); // below the board, right
-    this.presenceText.setText(`${Math.max(1, this.presence)} tocando en vivo`);
+    this.presenceText.setText(`${Math.max(1, this.presence)} ${t('playingLive')}`);
     this.layoutBpm();
   }
 
   private renderExpression(): void {
     const k = this.selectedCell;
     if (!k) {
-      this.exprLabel.setText('EDITA EL BEAT — toca uno');
+      this.exprLabel.setText(t('editIdle'));
     } else {
-      const [t] = k.split('_').map(Number);
-      const inst = instrumentById(this.effInstrument(t ?? 0));
+      const [tr] = k.split('_').map(Number);
+      const inst = instrumentById(this.effInstrument(tr ?? 0));
       const free = this.ownsCell(k);
-      this.exprLabel.setText(`EDITA EL BEAT · ${inst ? inst.label : 'beat'} ${free ? '(tuyo · gratis)' : '(ajeno · 1 ficha)'}`);
+      this.exprLabel.setText(`${t('editBeat')} · ${inst ? instrLabel(inst) : t('beat')} ${free ? t('yoursFree') : t('othersCost')}`);
     }
     const active = k ? this.effCellFx(k) : null;
     const onType = active && active.depth > 0 ? active.type : null;
@@ -1641,7 +1744,7 @@ export class Game extends Scene {
   }
 
   private flashNoFichas(): void {
-    this.toast('¡Sin fichas! (vuelven cada 12 h)', '#ffd1d1');
+    this.toast(t('noFichas'), '#ffd1d1');
   }
   private toast(msg: string, color: string): void {
     this.toastText.setText(msg).setColor(color).setAlpha(1);
@@ -1656,8 +1759,13 @@ export class Game extends Scene {
     this.bpmText.setText(`${this.bpm + this.draftTempo} BPM`).setFontSize(15 * s).setOrigin(0.5);
     const y = 56 * s;
     const half = this.bpmText.width / 2;
-    // Right-align the [-] BPM [+] group against the right edge (below the ⛶ button).
-    const cx = W - 12 * u - 37 * s - half;
+    // Play sits at the right end of this row (it used to live in the bottom bar); the
+    // [-] BPM [+] group is right-aligned just left of it.
+    const ppW = 40 * s;
+    const ppCx = W - 12 * u - ppW / 2;
+    this.ppImg.setPosition(ppCx, y).setDisplaySize(ppW, 32 * s);
+    this.ppIcon.setPosition(ppCx, y).setDisplaySize(20 * s, 20 * s);
+    const cx = ppCx - ppW / 2 - 8 * u - 37 * s - half; // 37s clears the [+] button's half + gap
     this.bpmText.setPosition(cx, y);
     this.tempoDown.setPosition(cx - half - 20 * s, y).setDisplaySize(34 * s, 30 * s);
     this.tempoDownT.setPosition(cx - half - 20 * s, y).setFontSize(22 * s);
@@ -1709,13 +1817,16 @@ export class Game extends Scene {
 
     // ---- grid: fills from the top band down to just above the expression block
     // (or, when compact, straight down to the bottom bar — no wave/FX inline). ----
-    const labelW = Phaser.Math.Clamp(W * 0.22, 70 * s, 130 * s);
-    const left = labelW + 6 * u;
     const top = 88 * s;
     const gridAnchor = compact ? by - pillH / 2 : exprTop;
     const gridH = Math.max(gridAnchor - 16 * s - top, 120 * s);
-    const cellW = (W - 10 * u - left) / STEPS;
     const rowH = gridH / TRACKS;
+    // The board shows ONLY the sound's icon, as big as a beat pad — the name lives in the
+    // picker. That also frees a chunk of width for the grid itself.
+    const licSz = Math.min(rowH * 0.92, 42 * s);
+    const labelW = licSz + 12 * u;
+    const left = labelW + 6 * u;
+    const cellW = (W - 10 * u - left) / STEPS;
     this.gridBox = { left, top, cellW, rowH };
 
     this.panel.clear();
@@ -1729,9 +1840,8 @@ export class Game extends Scene {
           .setDisplaySize(cellW - 3 * u, rowH - 6 * s);
       }
       const rowCy = top + t * rowH + rowH / 2;
-      const licSz = Math.min(rowH * 0.72, 20 * s);
-      this.labelIcons[t]?.setPosition(10 * u + licSz / 2, rowCy).setDisplaySize(licSz, licSz);
-      this.labels[t]?.setPosition(10 * u + licSz + 4 * u, rowCy).setFontSize(Math.min(12 * s, rowH * 0.4));
+      this.labelIcons[t]?.setPosition(6 * u + licSz / 2, rowCy).setDisplaySize(licSz, licSz);
+      this.labels[t]?.setVisible(false); // names only in the picker now
     }
     this.playhead.setSize(cellW, rowH * TRACKS);
     this.onStepVisual(this.curStep);
@@ -1747,17 +1857,15 @@ export class Game extends Scene {
     const rowL = 14 * u;
     const rowR = W - 14 * u;
     const gap = 6 * u;
-    const rowTop = rowY - edRowH / 2;
     const barH = edRowH * 0.82; // the flat buttons (FX / onda / redoble / reset)
 
     // The pad is a disc pinned to the EXACT centre of the row; the wave options fill the space
-    // to its left, redoble + reset the space to its right. It reaches a little past the bars, so
-    // the panel gets extra vertical padding rather than the bars getting taller.
+    // to its left, redoble + reset the space to its right. The panel HUGS the flat bars, so the
+    // disc clearly stands proud of it — that relief is what the roomy frame was hiding.
     const rowMid = (rowL + rowR) / 2;
-    const padPad = 9 * s;
     this.padCx = rowMid;
     this.padCy = rowY;
-    this.padR = edRowH * 0.6;
+    this.padR = edRowH * 0.58;
     this.padRIn = this.padR * 0.36; // the hub, left free for the readout
     const padW = this.padR * 2 + 4 * s;
     const leftW = rowMid - padW / 2 - gap - rowL;
@@ -1767,9 +1875,11 @@ export class Game extends Scene {
     // the row's panel, plus the disc's frame drawn BEHIND the wedges
     this.edPanels.clear().setVisible(!compact);
     if (!compact) {
+      const pT = rowY - barH / 2 - 3 * s;
+      const pH = barH + 6 * s;
       this.edPanels.fillStyle(this.theme.panel, 0.4).lineStyle(2 * s, INK, 0.28);
-      this.edPanels.fillRoundedRect(rowL - 6 * u, rowTop - padPad, rowR - rowL + 12 * u, edRowH + padPad * 2, 10 * s);
-      this.edPanels.strokeRoundedRect(rowL - 6 * u, rowTop - padPad, rowR - rowL + 12 * u, edRowH + padPad * 2, 10 * s);
+      this.edPanels.fillRoundedRect(rowL - 3 * u, pT, rowR - rowL + 6 * u, pH, 10 * s);
+      this.edPanels.strokeRoundedRect(rowL - 3 * u, pT, rowR - rowL + 6 * u, pH, 10 * s);
       this.edPanels.fillStyle(WAVE_FILL, 0.7).fillCircle(rowMid, rowY, this.padR + 2.5 * s);
       this.edPanels.lineStyle(2.5 * s, INK, 0.5).strokeCircle(rowMid, rowY, this.padR + 2.5 * s);
     }
@@ -1857,9 +1967,10 @@ export class Game extends Scene {
     const rankCx = saveCx - saveW / 2 - 6 * u - sq / 2;
     this.rankImg.setPosition(rankCx, by).setDisplaySize(sq, pillH);
     this.rankIcon.setPosition(rankCx, by).setDisplaySize(24 * s, 24 * s);
-    const ppBx = rankCx - sq / 2 - 6 * u - sq / 2;
-    this.ppImg.setPosition(ppBx, by).setDisplaySize(sq, pillH);
-    this.ppIcon.setPosition(ppBx, by).setDisplaySize(20 * s, 20 * s);
+    // play/pause moved up beside the BPM; settings takes its place down here
+    const setCx = rankCx - sq / 2 - 6 * u - sq / 2;
+    this.setImg.setPosition(setCx, by).setDisplaySize(sq, pillH);
+    this.setIcon.setPosition(setCx, by).setDisplaySize(22 * s, 22 * s);
 
     this.footer.setVisible(!compact).setPosition(W / 2, H - 12 * s).setFontSize(10 * s);
     this.toastText.setPosition(W / 2, top + gridH * 0.4).setFontSize(15 * s);
@@ -1880,6 +1991,10 @@ export class Game extends Scene {
     this.inlineCatcher = null;
     this.rankBtn?.remove();
     this.rankBtn = null;
+    this.setBtn?.remove();
+    this.setBtn = null;
+    this.setOverlay?.remove();
+    this.setOverlay = null;
     this.rankOverlay?.remove();
     this.rankOverlay = null;
     this.game.canvas.removeEventListener('pointerdown', this.unlockAudio);

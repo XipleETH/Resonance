@@ -154,6 +154,7 @@ export const ICONS: Record<string, string> = {
   save: wrap(`<rect x="7" y="7" width="26" height="26" rx="3" fill="#3fb0ac"/><rect x="12" y="7" width="12" height="9" fill="${PAPER}"/><rect x="19" y="9" width="3" height="6" fill="${INK}" stroke="none"/><rect x="12" y="21" width="16" height="8" rx="1" fill="${PAPER}"/><line x1="15" y1="24" x2="25" y2="24"/><line x1="15" y1="27" x2="25" y2="27"/>`),
   rank: wrap(`<path d="M13 8 L27 8 L27 14 Q27 20 20 21 Q13 20 13 14 Z" fill="#f2b705"/><path d="M13 10 Q7 10 8 16 Q9 19 13 18" fill="none"/><path d="M27 10 Q33 10 32 16 Q31 19 27 18" fill="none"/><line x1="20" y1="21" x2="20" y2="27"/><rect x="14" y="27" width="12" height="4" rx="1" fill="#f2b705"/><rect x="11" y="31" width="18" height="4" rx="1" fill="#f2b705"/>`),
   clock: wrap(`<circle cx="20" cy="20" r="13" fill="none" stroke-width="3"/><line x1="20" y1="20" x2="20" y2="12"/><line x1="20" y1="20" x2="26" y2="22"/>`),
+  gear: wrap(`<circle cx="20" cy="20" r="8.5" fill="#c9b487"/><circle cx="20" cy="20" r="3.4" fill="${PAPER}"/><line x1="20" y1="5" x2="20" y2="11"/><line x1="20" y1="29" x2="20" y2="35"/><line x1="5" y1="20" x2="11" y2="20"/><line x1="29" y1="20" x2="35" y2="20"/><line x1="9.5" y1="9.5" x2="13.8" y2="13.8"/><line x1="26.2" y1="26.2" x2="30.5" y2="30.5"/><line x1="30.5" y1="9.5" x2="26.2" y2="13.8"/><line x1="13.8" y1="26.2" x2="9.5" y2="30.5"/>`),
 };
 
 // The "RESONANCE" title wordmark: each letter is built FROM musical notation (R/E = beamed
