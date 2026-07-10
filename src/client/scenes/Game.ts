@@ -305,7 +305,7 @@ export class Game extends Scene {
   private gridBox = { left: 0, top: 0, cellW: 10, rowH: 10 };
   private waveBox = { x: 0, y: 0, w: 10, h: 10 };
   private fxBox = { x: 0, y: 0, w: 10, h: 10 }; // the tri-segment FX button
-  private tonoLong = false; // enough room between the ▼/▲ arrows to spell "tono"?
+  private padLong = false; // enough room inside the cross pad to spell "tono"/"vol"?
   // Devvit's requestExpandedMode/exitExpandedMode ONLY accept a trusted native `click`,
   // and Phaser preventDefaults touchstart on the canvas which suppresses the synthetic
   // click on mobile — so canvas taps can never trigger them. fsBtn is a real DOM button
@@ -407,11 +407,13 @@ export class Game extends Scene {
     // edPanels draws the row's panel; it's created after the controls, so it needs a depth or it
     // would tint everything it sits under.
     this.edPanels = this.add.graphics().setDepth(-1);
+    // Tono lives on the pad's horizontal axis, so the up/down arrow icons are turned 90° to
+    // point ◀ (down = lower) and ▶ (up = higher); the colours keep their meaning.
     this.edPitchDn = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
-    this.edPitchDnIc = this.add.image(0, 0, 'ic_pitch_dn');
+    this.edPitchDnIc = this.add.image(0, 0, 'ic_pitch_dn').setAngle(90);
     this.edPitchDn.on('pointerdown', () => this.nudgePitch(-1));
     this.edPitchUp = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
-    this.edPitchUpIc = this.add.image(0, 0, 'ic_pitch_up');
+    this.edPitchUpIc = this.add.image(0, 0, 'ic_pitch_up').setAngle(90);
     this.edPitchUp.on('pointerdown', () => this.nudgePitch(1));
     this.edPitchVal = this.add.text(0, 0, 'tono 0', { fontFamily: CRAYON, fontSize: '12px', color: '#4a3a22' }).setOrigin(0.5);
     this.edSub = this.add.image(0, 0, 'cb_pill').setTint(0xf0e7d0).setInteractive({ useHandCursor: true });
@@ -1196,11 +1198,12 @@ export class Game extends Scene {
       o.setAlpha(a);
     const p = fx ? fx.pitch : 0;
     const pStr = p > 0 ? `+${p}` : `${p}`;
-    this.edPitchVal.setText(this.tonoLong ? `tono ${pStr}` : pStr);
+    this.edPitchVal.setText(this.padLong ? `tono ${pStr}` : `t${pStr}`);
     this.edSubIc.setTexture(`ic_sub${fx ? fx.sub : 1}`);
     this.edSubTx.setText(`×${fx ? fx.sub : 1}`);
     const v = fx ? fx.vol : 0;
-    this.edVolTx.setText(v > 0 ? `+${v}` : `${v}`);
+    const vStr = v > 0 ? `+${v}` : `${v}`;
+    this.edVolTx.setText(this.padLong ? `vol ${vStr}` : `v${vStr}`);
     this.waveTx.setText(fx ? (WAVE_PRESETS[waveIdx(fx)]?.name ?? 'onda') : 'onda');
   }
 
@@ -1688,7 +1691,8 @@ export class Game extends Scene {
     this.onStepVisual(this.curStep);
 
     // ---- beat editor (expanded only): ONE row, left→right ----
-    //   [▼ tono ▲] · [redoble] · [ vibrato | trémolo | wah ] · [onda] · [▲ vol ▼] · [↺]
+    //   wave options            centre pad              right
+    //   [vib|tré|wah] [onda] · [▲vol▼ / ◀tono▶] · [redoble] [↺]
     // Widths are FRACTIONS of the row so the whole thing fits any frame, from a phone to a
     // wide desktop modal; labels appear only where their slot is wide enough for them.
     this.exprLabel.setVisible(!compact).setPosition(14 * u, exprTop).setFontSize(12 * s);
@@ -1697,13 +1701,12 @@ export class Game extends Scene {
     const rowL = 14 * u;
     const rowR = W - 14 * u;
     const gap = 6 * u;
-    const avail = rowR - rowL - gap * 5; // 6 groups → 5 gaps
-    const wTono = avail * 0.24;
-    const wSub = avail * 0.12;
-    const wFx = avail * 0.29;
+    const avail = rowR - rowL - gap * 4; // 5 groups → 4 gaps
+    const wFx = avail * 0.28;
     const wWave = avail * 0.2;
-    const wVol = avail * 0.09;
-    const wRst = avail * 0.06;
+    const wPad = avail * 0.26;
+    const wSub = avail * 0.15;
+    const wRst = avail * 0.11;
     const rowTop = rowY - edRowH / 2;
 
     // the row's panel
@@ -1716,26 +1719,7 @@ export class Game extends Scene {
 
     let x = rowL;
 
-    // 1 · tono: [▼] value [▲]
-    const aw = Math.min(32 * s, wTono * 0.3);
-    const aIc = edRowH * 0.42;
-    this.tonoLong = wTono - 2 * aw > 62 * s; // else the word would run under the arrows
-    this.edPitchDn.setVisible(!compact).setPosition(x + aw / 2, rowY).setDisplaySize(aw, edRowH * 0.86);
-    this.edPitchDnIc.setVisible(!compact).setPosition(x + aw / 2, rowY).setDisplaySize(aIc, aIc);
-    this.edPitchVal.setVisible(!compact).setPosition(x + wTono / 2, rowY).setFontSize(Math.min(12 * s, wTono * 0.14));
-    this.edPitchUp.setVisible(!compact).setPosition(x + wTono - aw / 2, rowY).setDisplaySize(aw, edRowH * 0.86);
-    this.edPitchUpIc.setVisible(!compact).setPosition(x + wTono - aw / 2, rowY).setDisplaySize(aIc, aIc);
-    x += wTono + gap;
-
-    // 2 · redoble (ratchet): notation icon, plus "×N" when there's room
-    const subTxt = wSub > 74 * s;
-    this.edSub.setVisible(!compact).setPosition(x + wSub / 2, rowY).setDisplaySize(wSub, edRowH * 0.86);
-    const subIcSz = edRowH * 0.56;
-    this.edSubIc.setVisible(!compact).setPosition(subTxt ? x + wSub * 0.36 : x + wSub / 2, rowY).setDisplaySize(subIcSz, subIcSz);
-    this.edSubTx.setVisible(!compact && subTxt).setPosition(x + wSub * 0.62, rowY).setFontSize(11 * s);
-    x += wSub + gap;
-
-    // 3 · ONE big FX button split in three
+    // 1 · wave options, part A: ONE big FX button split in three
     this.fxBox = { x, y: rowTop + edRowH * 0.07, w: wFx, h: edRowH * 0.86 };
     this.fxPill.setVisible(!compact).setPosition(x + wFx / 2, rowY).setDisplaySize(wFx, this.fxBox.h);
     this.fxDiv.setVisible(!compact);
@@ -1760,7 +1744,7 @@ export class Game extends Scene {
     }
     x += wFx + gap;
 
-    // 4 · onda: preset name (when it fits) + the waveform, tap = next preset
+    // 2 · wave options, part B: the preset button (name when it fits + the waveform)
     const waveName = wWave > 118 * s;
     this.waveBox = { x, y: rowTop + edRowH * 0.07, w: wWave, h: edRowH * 0.86 };
     this.wavePill.setVisible(!compact).setPosition(x + wWave / 2, rowY).setDisplaySize(wWave, this.waveBox.h);
@@ -1768,19 +1752,36 @@ export class Game extends Scene {
     this.waveG.setVisible(!compact);
     x += wWave + gap;
 
-    // 5 · volumen: [▲] on top, level, [▼] below
-    const vbH = edRowH * 0.38;
-    const vIc = vbH * 0.68;
-    this.edVolUp.setVisible(!compact).setPosition(x + wVol / 2, rowTop + vbH / 2).setDisplaySize(wVol, vbH);
-    this.edVolUpIc.setVisible(!compact).setPosition(x + wVol / 2, rowTop + vbH / 2).setDisplaySize(vIc, vIc);
-    this.edVolTx.setVisible(!compact).setPosition(x + wVol / 2, rowY).setFontSize(Math.min(10 * s, wVol * 0.34));
-    this.edVolDn.setVisible(!compact).setPosition(x + wVol / 2, rowTop + edRowH - vbH / 2).setDisplaySize(wVol, vbH);
-    this.edVolDnIc.setVisible(!compact).setPosition(x + wVol / 2, rowTop + edRowH - vbH / 2).setDisplaySize(vIc, vIc);
-    x += wVol + gap;
+    // 3 · centre: volumen (▲/▼) and tono (◀/▶) combined into one cross pad, values in the middle
+    const padCx = x + wPad / 2;
+    const sideW = wPad * 0.3; // ◀ / ▶ buttons
+    const vertH = edRowH * 0.33; // ▲ / ▼ buttons
+    const padIc = Math.min(sideW, vertH) * 0.68;
+    this.padLong = wPad > 150 * s; // room to spell "tono"/"vol"?
+    const midFont = Math.min(9.5 * s, wPad * 0.115);
+    this.edVolUp.setVisible(!compact).setPosition(padCx, rowTop + vertH / 2).setDisplaySize(wPad * 0.36, vertH);
+    this.edVolUpIc.setVisible(!compact).setPosition(padCx, rowTop + vertH / 2).setDisplaySize(padIc, padIc);
+    this.edVolDn.setVisible(!compact).setPosition(padCx, rowTop + edRowH - vertH / 2).setDisplaySize(wPad * 0.36, vertH);
+    this.edVolDnIc.setVisible(!compact).setPosition(padCx, rowTop + edRowH - vertH / 2).setDisplaySize(padIc, padIc);
+    this.edPitchDn.setVisible(!compact).setPosition(x + sideW / 2, rowY).setDisplaySize(sideW, edRowH * 0.4);
+    this.edPitchDnIc.setVisible(!compact).setPosition(x + sideW / 2, rowY).setDisplaySize(padIc, padIc);
+    this.edPitchUp.setVisible(!compact).setPosition(x + wPad - sideW / 2, rowY).setDisplaySize(sideW, edRowH * 0.4);
+    this.edPitchUpIc.setVisible(!compact).setPosition(x + wPad - sideW / 2, rowY).setDisplaySize(padIc, padIc);
+    this.edPitchVal.setVisible(!compact).setPosition(padCx, rowY - midFont * 0.62).setFontSize(midFont);
+    this.edVolTx.setVisible(!compact).setPosition(padCx, rowY + midFont * 0.62).setFontSize(midFont);
+    x += wPad + gap;
 
-    // 6 · reset (tap = flatten this beat's expression, hold = clear the whole draft)
-    this.resetImg.setVisible(!compact).setPosition(x + wRst / 2, rowY).setDisplaySize(wRst, edRowH * 0.86);
-    this.resetText.setVisible(!compact).setPosition(x + wRst / 2, rowY).setFontSize(Math.min(20 * s, wRst * 0.6));
+    // 4 · redoble (ratchet): notation icon, plus "×N" when there's room
+    const subTxt = wSub > 74 * s;
+    this.edSub.setVisible(!compact).setPosition(x + wSub / 2, rowY).setDisplaySize(wSub, edRowH * 0.86);
+    const subIcSz = edRowH * 0.56;
+    this.edSubIc.setVisible(!compact).setPosition(subTxt ? x + wSub * 0.36 : x + wSub / 2, rowY).setDisplaySize(subIcSz, subIcSz);
+    this.edSubTx.setVisible(!compact && subTxt).setPosition(x + wSub * 0.62, rowY).setFontSize(11 * s);
+    x += wSub + gap;
+
+    // 5 · reset (tap = flatten this beat's expression, hold = clear the whole draft)
+    this.resetImg.setVisible(!compact).setPosition(x + wRst / 2, rowY).setDisplaySize(Math.min(wRst, 44 * s), edRowH * 0.86);
+    this.resetText.setVisible(!compact).setPosition(x + wRst / 2, rowY).setFontSize(Math.min(20 * s, wRst * 0.5));
 
     // ---- bottom bar: fichas + clock (left); play/pause, ranking, save (right) ----
     const dotGap = 18 * u;
