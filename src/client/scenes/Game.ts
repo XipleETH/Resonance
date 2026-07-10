@@ -43,7 +43,7 @@ import {
   type RankingsResponse,
   type TrackFx,
 } from '../../shared/jam';
-import { getLang, instrLabel, noteName, setLang, t, type Lang } from '../i18n';
+import { getLang, guide, instrLabel, noteName, setLang, t, type GuideRow, type Lang } from '../i18n';
 
 const KRAFT = '#cdb083';
 const INK = 0x3a2f22;
@@ -787,8 +787,8 @@ export class Game extends Scene {
   }
 
   /**
-   * Settings. Language is the only option for now (the button/app guide comes later); flipping it
-   * re-labels everything in place — `layout()` re-runs so the pills resize around their new text.
+   * Settings: the language switch + the in-app guide. Flipping the language re-labels everything
+   * in place — `layout()` re-runs so the pills resize around their new text — and repaints this.
    */
   private setupSettingsOverlay(): void {
     if (this.setOverlay) return;
@@ -800,9 +800,11 @@ export class Game extends Scene {
         #st-ov{position:fixed;inset:0;z-index:21;background:rgba(32,26,18,.55);
           font-family:'Gochi Hand','Comic Sans MS',cursive;overflow:auto;
           -webkit-tap-highlight-color:transparent}
-        #st-ov .st-card{max-width:420px;margin:8vh auto;background:#e7d6ac;border:3px solid #3a2f22;
+        #st-ov .st-card{max-width:460px;margin:6vh auto;background:#e7d6ac;border:3px solid #3a2f22;
           border-radius:18px;padding:14px 16px 20px;color:#3a2f22}
-        #st-ov .st-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+        /* the guide is long — keep the title + ✕ reachable while it scrolls */
+        #st-ov .st-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;
+          position:sticky;top:-2px;background:#e7d6ac;padding:6px 0 4px;z-index:1}
         #st-ov .st-title{font-size:26px;color:#e2574c;transform:rotate(-2deg)}
         #st-ov .st-x{font-size:22px;background:#f1b0a0;border:2px solid #3a2f22;border-radius:50%;
           width:34px;height:34px;line-height:30px;text-align:center;cursor:pointer}
@@ -811,6 +813,17 @@ export class Game extends Scene {
         #st-ov .st-lang{flex:1;font-family:inherit;font-size:19px;padding:10px 6px;cursor:pointer;
           background:#f1e3bf;border:2.5px solid #3a2f22;border-radius:14px;color:#3a2f22}
         #st-ov .st-lang.on{background:#8fd6a0}
+        #st-ov .st-rule{border:none;border-top:2px dashed #c9b487;margin:16px 0 10px}
+        #st-ov .st-intro{font-size:16px;line-height:1.4;background:#f1e3bf;border:2px solid #3a2f22;
+          border-radius:14px;padding:9px 11px;margin-bottom:6px}
+        #st-ov .st-h{font-size:19px;color:#e2574c;margin:14px 2px 6px;transform:rotate(-.6deg)}
+        #st-ov .st-row{display:flex;align-items:flex-start;gap:9px;padding:4px 2px;font-size:15.5px;
+          line-height:1.35;border-bottom:1.5px dashed #d6c49a}
+        #st-ov .st-row:last-child{border-bottom:none}
+        #st-ov .st-ic{flex:0 0 26px;width:26px;height:26px;margin-top:1px}
+        #st-ov .st-bul{flex:0 0 26px;text-align:center;color:#8a7a58}
+        #st-ov .st-k{flex:0 0 auto;background:#f1e3bf;border:2px solid #3a2f22;border-radius:9px;
+          padding:0 6px;margin-top:1px;white-space:nowrap}
       </style>
       <div class="st-card">
         <div class="st-top"><span class="st-title" id="st-title"></span><div class="st-x" id="st-close">✕</div></div>
@@ -819,6 +832,9 @@ export class Game extends Scene {
           <button class="st-lang" id="st-es" type="button">Español</button>
           <button class="st-lang" id="st-en" type="button">English</button>
         </div>
+        <hr class="st-rule">
+        <div class="st-sec" id="st-guidelabel"></div>
+        <div id="st-guide"></div>
       </div>`;
     document.body.appendChild(ov);
     this.setOverlay = ov;
@@ -839,6 +855,17 @@ export class Game extends Scene {
     ov.querySelector('#st-en')?.addEventListener('click', () => pick('en'));
   }
 
+  /** A crayon icon as a data URL, so the DOM guide shows the very same art as the buttons. */
+  private iconUrl(name: string): string {
+    try {
+      const src = this.textures.get(`ic_${name}`)?.getSourceImage();
+      if (src instanceof HTMLCanvasElement) return src.toDataURL();
+    } catch {
+      /* texture missing → fall back to a bullet */
+    }
+    return '';
+  }
+
   private paintSettings(): void {
     const ov = this.setOverlay;
     if (!ov) return;
@@ -848,8 +875,22 @@ export class Game extends Scene {
     };
     set('#st-title', t('settings'));
     set('#st-langlabel', t('language'));
+    set('#st-guidelabel', t('guide'));
     ov.querySelector('#st-es')?.classList.toggle('on', getLang() === 'es');
     ov.querySelector('#st-en')?.classList.toggle('on', getLang() === 'en');
+
+    const esc = (x: string): string => x.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch] ?? ch);
+    const g = guide();
+    const rowHtml = (r: GuideRow): string => {
+      const url = r.icon ? this.iconUrl(r.icon) : '';
+      const lead = url ? `<img class="st-ic" src="${url}" alt="">` : r.k ? `<span class="st-k">${esc(r.k)}</span>` : `<span class="st-bul">•</span>`;
+      return `<div class="st-row">${lead}<span>${esc(r.v)}</span></div>`;
+    };
+    const body =
+      `<div class="st-intro">${esc(g.intro)}</div>` +
+      g.secs.map((sec) => `<div class="st-h">${esc(sec.h)}</div>${sec.rows.map(rowHtml).join('')}`).join('');
+    const host = ov.querySelector('#st-guide');
+    if (host) host.innerHTML = body;
   }
 
   private openSettings(): void {
