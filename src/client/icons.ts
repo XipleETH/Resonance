@@ -3,6 +3,8 @@
  * rasterizes them into Phaser textures keyed `ic_<name>`. Style: dark-ink outline + the
  * item's colour, with a subtle feTurbulence "rough" wobble so it reads as crayon, not clip-art.
  */
+import type * as Phaser from 'phaser';
+
 const INK = '#3a2f22';
 const PAPER = '#e7d6ac'; // negative space matches the panel behind the icons
 
