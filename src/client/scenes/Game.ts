@@ -1154,12 +1154,6 @@ export class Game extends Scene {
   private cellActive(k: string): boolean {
     return this.draftPlace.has(k) || (this.sharedCells.has(k) && !this.draftRemove.has(k));
   }
-  private cellOwner(k: string): string {
-    return this.draftPlace.has(k) ? this.myUserId : (this.sharedCells.get(k)?.by ?? '');
-  }
-  private ownsCell(k: string): boolean {
-    return this.myUserId !== '' && this.cellOwner(k) === this.myUserId;
-  }
   private effCellFx(k: string): TrackFx {
     return this.draftCellFx.get(k) ?? this.sharedCells.get(k)?.fx ?? { ...FLAT_FX };
   }
@@ -1177,11 +1171,11 @@ export class Game extends Scene {
     let instrCost = 0;
     for (const [t] of this.draftInstr) if ((this.instruments[t] ?? '') !== '') instrCost += 1;
     let cost = this.draftPlace.size + instrCost + Math.ceil(Math.abs(this.draftTempo) / 2);
-    cost += this.draftRemove.size; // removing a committed beat always costs a ficha (even yours)
+    cost += this.draftRemove.size; // removing a saved beat always costs a ficha (even your own)
     for (const [k, fx] of this.draftCellFx) {
-      if (this.draftPlace.has(k)) continue; // fx rides on the place action (free)
+      if (this.draftPlace.has(k)) continue; // shaping the beat you're placing rides along, free
       if (this.fxKey(fx) === this.fxKey(this.sharedCells.get(k)?.fx ?? { ...FLAT_FX })) continue;
-      cost += this.ownsCell(k) ? 0 : 1;
+      cost += 1; // editing a SAVED beat costs a ficha, whoever placed it
     }
     return cost;
   }
@@ -1434,9 +1428,10 @@ export class Game extends Scene {
 
   /** Stage a wave change for a cell. Blocks if it would cost more than you have. */
   private setDraftFx(k: string, fx: TrackFx, quiet = false): void {
+    // Shaping a beat you're placing is free; touching a SAVED one costs a ficha, yours or not.
     if (!this.draftCellFx.has(k) && !this.draftPlace.has(k)) {
       const changed = this.fxKey(fx) !== this.fxKey(this.sharedCells.get(k)?.fx ?? { ...FLAT_FX });
-      if (changed && !this.ownsCell(k) && this.pendingCost() + 1 > this.energy) {
+      if (changed && this.pendingCost() + 1 > this.energy) {
         if (!quiet) this.flashNoFichas();
         return;
       }
@@ -1689,8 +1684,9 @@ export class Game extends Scene {
     } else {
       const [tr] = k.split('_').map(Number);
       const inst = instrumentById(this.effInstrument(tr ?? 0));
-      const free = this.ownsCell(k);
-      this.exprLabel.setText(`${t('editBeat')} · ${inst ? instrLabel(inst) : t('beat')} ${free ? t('yoursFree') : t('othersCost')}`);
+      // Free while it's still the beat you're placing; once saved, any edit costs a ficha.
+      const free = this.draftPlace.has(k);
+      this.exprLabel.setText(`${t('editBeat')} · ${inst ? instrLabel(inst) : t('beat')} ${free ? t('newFree') : t('savedCost')}`);
     }
     const active = k ? this.effCellFx(k) : null;
     const onType = active && active.depth > 0 ? active.type : null;

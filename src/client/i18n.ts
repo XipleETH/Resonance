@@ -61,8 +61,8 @@ const ES: Dict = {
   editIdle: 'EDITA EL BEAT — toca uno',
   editBeat: 'EDITA EL BEAT',
   beat: 'beat',
-  yoursFree: '(tuyo · gratis)',
-  othersCost: '(ajeno · 1 ficha)',
+  newFree: '(nuevo · gratis)',
+  savedCost: '(guardado · 1 ficha)',
   tono: 'tono',
   vol: 'vol',
   onda: 'onda',
@@ -112,8 +112,8 @@ const EN: Dict = {
   editIdle: 'EDIT THE BEAT — tap one',
   editBeat: 'EDIT THE BEAT',
   beat: 'beat',
-  yoursFree: '(yours · free)',
-  othersCost: "(someone else's · 1 token)",
+  newFree: '(new · free)',
+  savedCost: '(saved · 1 token)',
   tono: 'pitch',
   vol: 'vol',
   onda: 'wave',
@@ -259,7 +259,7 @@ export type Guide = { intro: string; secs: GuideSec[] };
 
 const GUIDE_ES: Guide = {
   intro:
-    'RESONANCE es un jam colaborativo. Cada día nace un post nuevo, con su propia clave y sus propios colores, y todo el mundo edita el MISMO loop de 8 pistas × 16 pasos. Lo que guardas lo oyen los demás.',
+    'RESONANCE es un jam colaborativo. Cada día nace un post nuevo, con su propia clave y sus propios colores, y todo el mundo edita el MISMO loop de 8 pistas × 16 pasos. Ningún post se cierra: puedes volver cualquier día a cualquier canción y seguir editándola. Lo que guardas lo oyen los demás.',
   secs: [
     {
       h: 'El tablero',
@@ -286,7 +286,8 @@ const GUIDE_ES: Guide = {
       h: 'Fichas y guardar',
       rows: [
         { v: 'Tienes 4 fichas y vuelven cada 12 h.' },
-        { v: 'Poner un beat cuesta 1. Quitar uno ya guardado cuesta 1, aunque sea tuyo.' },
+        { v: 'Añadir un beat cuesta 1 ficha, y con ella lo dejas como quieras antes de guardar.' },
+        { v: 'Una vez guardado: editarlo cuesta 1 ficha y borrarlo cuesta 1 ficha, sea tuyo o de otro.' },
         { v: 'TODOS los ajustes de un beat (onda, tono, redoble, volumen) cuentan como una sola ficha.' },
         { v: 'Elegir el sonido de una fila vacía es gratis: va incluido con su primer beat.' },
         { icon: 'save', v: 'GUARDAR envía tu borrador a todo el mundo. Arriba ves cuánto costará.' },
@@ -307,7 +308,7 @@ const GUIDE_ES: Guide = {
 
 const GUIDE_EN: Guide = {
   intro:
-    'RESONANCE is a collaborative jam. A new post is born every day, with its own key and its own colours, and everybody edits the SAME 8-track × 16-step loop. Whatever you save, the others hear.',
+    'RESONANCE is a collaborative jam. A new post is born every day, with its own key and its own colours, and everybody edits the SAME 8-track × 16-step loop. No post ever closes: come back any day, to any song, and keep editing it. Whatever you save, the others hear.',
   secs: [
     {
       h: 'The board',
@@ -334,7 +335,8 @@ const GUIDE_EN: Guide = {
       h: 'Tokens and saving',
       rows: [
         { v: 'You get 4 tokens and they come back every 12 h.' },
-        { v: 'Placing a beat costs 1. Removing a saved one costs 1, even your own.' },
+        { v: 'Adding a beat costs 1 token, and that token also lets you shape it before you save.' },
+        { v: 'Once saved: editing it costs 1 token and deleting it costs 1 token — yours or anyone’s.' },
         { v: 'ALL of a beat’s settings (wave, pitch, ratchet, volume) count as a single token.' },
         { v: "Picking an empty row's sound is free: it rides along with that row's first beat." },
         { icon: 'save', v: 'SAVE sends your draft to everyone. The button shows what it will cost.' },

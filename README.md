@@ -1,14 +1,14 @@
 # RESONANCE
 
-**A jam that only exists for one day.**
+**A song the whole subreddit writes, four tokens at a time.**
 
-Every day a bot posts a fresh RESONANCE loop to the subreddit — its own musical key, its own colour
-palette, its own 24 sounds drawn from a library of 98. Everyone who scrolls past edits **the same
-8-track × 16-step loop**, live. You get **4 tokens**, they refill every 12 hours, and whatever you
-place is heard by everyone else.
+Every day a bot posts a fresh RESONANCE loop — its own musical key, its own colour palette, its own
+24 sounds drawn from a library of 98. Everyone who scrolls past edits **the same 8-track × 16-step
+loop**, live. You get **4 tokens**, they refill every 12 hours, and whatever you place is heard by
+everyone else.
 
-Tomorrow the post is still there, still playable, still in yesterday's key. But the jam has moved
-on. Nobody stages it. The community builds it, one token at a time.
+**No song ever closes.** Scroll back a week and that post is still there, still in its own key, and
+still yours to edit. Nobody stages any of it. The community builds it, one token at a time.
 
 ▶ **Play it:** [r/Resonance_app](https://www.reddit.com/r/Resonance_app/) · Built for Reddit's
 **Games with a Hook** hackathon.
@@ -22,10 +22,11 @@ Most music toys are solitary and infinite. RESONANCE is neither.
 - **It's collaborative by construction.** There is one loop per post, not one per player. You
   aren't making *your* track — you're arguing with strangers about *the* track, in four-token
   increments.
-- **It's scarce.** Four tokens per 12 hours. Removing someone's beat costs you one, even if that
-  beat is yours. That single rule turns a sandbox into a negotiation: you have to *want* the change.
-- **It's ephemeral, then permanent.** Each day's post freezes with its key and its colours. Scroll
-  back and you hear what that day's crowd agreed on.
+- **It's scarce.** Four tokens per 12 hours. Once a beat is saved, touching it again — editing it
+  or deleting it — costs a token, whoever placed it. That single rule turns a sandbox into a
+  negotiation: you have to *want* the change.
+- **Nothing is ever finished.** Every post stays open forever, in the key it was born in. A song
+  from last month is one scroll away and one token from changing.
 - **It lives in the feed.** The post plays as you swipe past it. Tap once and you're inside it.
 
 ---
@@ -54,9 +55,12 @@ Tap a beat to select it; its editor appears below.
 ### Tokens
 
 - You have **4 tokens**; they come back **every 12 hours**.
-- Placing a beat costs **1**. Removing an already-saved one costs **1** — even your own.
+- **Adding** a beat costs **1** — and that token also buys you every tweak you make to it before
+  you save.
+- Once a beat is **saved**, **editing** it costs **1** and **deleting** it costs **1**, whether it
+  was yours or a stranger's.
 - **All** of a beat's settings (wave, pitch, ratchet, volume) count as a **single** token, so
-  shaping a beat is cheap and fiddling with it is free.
+  shaping a beat is one decision, not four.
 - Choosing an empty row's sound is **free** — it rides along with that row's first beat.
 - **SAVE** commits your draft to everyone. The button shows what it will cost before you press it.
 

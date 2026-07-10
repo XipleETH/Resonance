@@ -163,21 +163,22 @@ export async function commit(
   const state = await getState(postId);
   const fichas = await getEnergy(postId, userId);
 
-  // Who placed each existing beat (for ownership-based cost).
+  // Who placed each existing beat — an edit keeps the original placer's name on it.
   const ownerOf = new Map<string, string>();
   for (const c of state.cells) ownerOf.set(`${c.track}_${c.step}`, c.by);
-  const mine = (k: string): boolean => ownerOf.get(k) === userId;
 
-  // place a beat = 1; removing a committed beat = 1 (even your own, so saves stick);
-  // editing YOUR OWN beat's wave = 0, someone else's = 1;
-  // choosing an instrument for an EMPTY row = 0 (rides on the first beat's ficha), changing
-  // an existing one = 1; tempo = 1 per 2 BPM.
+  // Once a beat is SAVED it costs a ficha to touch again — whoever placed it. Ownership no longer
+  // buys free edits, otherwise whoever got there first could reshape a beat forever.
+  //   place a beat = 1 (and shaping it before you save rides along, free);
+  //   removing a saved beat = 1; editing a saved beat's expression = 1;
+  //   choosing an instrument for an EMPTY row = 0 (rides on that row's first beat), changing an
+  //   existing one = 1; tempo = 1 per 2 BPM.
   const actionCost = (a: JamAction): number => {
     switch (a.kind) {
       case 'remove':
         return 1;
       case 'setCellFx':
-        return mine(`${a.track}_${a.step}`) ? 0 : 1;
+        return 1; // only ever emitted for an already-saved beat
       case 'setInstrument':
         return (state.meta.instruments[a.track] ?? '') === '' ? 0 : 1;
       case 'nudgeTempo':
