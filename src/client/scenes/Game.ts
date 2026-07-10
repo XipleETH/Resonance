@@ -1323,19 +1323,24 @@ export class Game extends Scene {
     this.drawPad();
   }
 
-  /** The pad's diagonal dividers over the crayon pill, + a triangle behind the pressed zone. */
+  /**
+   * The pad's dividers over the crayon pill, + a wedge behind the pressed zone. Both start at the
+   * hub's edge, so the centre stays clear for the readout.
+   */
   private drawPad(): void {
     const g = this.padG;
     g.clear();
     if (!g.visible) return;
-    const { padCx: cx, padCy: cy, padR: R } = this;
-    const r = R * 0.9; // keep triangles/lines inside the pill's rounded corners
+    const { padCx: cx, padCy: cy, padR: R, padRIn: hub } = this;
+    const r = R * 0.9; // keep the corners inside the pill's rounded edge
     const c = [
       new Phaser.Math.Vector2(cx + r, cy - r), // TR
       new Phaser.Math.Vector2(cx + r, cy + r), // BR
       new Phaser.Math.Vector2(cx - r, cy + r), // BL
       new Phaser.Math.Vector2(cx - r, cy - r), // TL
     ];
+    // the same corner directions, but pulled back to the hub's edge (keeps the middle open)
+    const inner = c.map((p) => new Phaser.Math.Vector2(cx + (p.x - cx) * (hub / (r * Math.SQRT2)), cy + (p.y - cy) * (hub / (r * Math.SQRT2))));
     // zone q spans two adjacent corners: right=TR..BR, down=BR..BL, left=BL..TL, up=TL..TR
     const pairs = [
       [0, 1],
@@ -1345,16 +1350,21 @@ export class Game extends Scene {
     ];
     if (this.padPressed >= 0) {
       const [a = 0, b = 1] = pairs[this.padPressed] ?? [0, 1];
-      const tri = [new Phaser.Math.Vector2(cx, cy), c[a] ?? c[0], c[b] ?? c[0]] as Phaser.Math.Vector2[];
-      g.fillStyle(0xffe6a7, 0.95).fillPoints(tri, true);
+      // trapezoid innerA → cornerA → cornerB → innerB (never covers the hub)
+      const quad = [inner[a], c[a], c[b], inner[b]] as Phaser.Math.Vector2[];
+      g.fillStyle(0xffe6a7, 0.95).fillPoints(quad, true);
     }
     g.lineStyle(2 * this.s, INK, 0.32);
-    for (const p of c) {
+    for (let i = 0; i < 4; i++) {
+      const p0 = inner[i] as Phaser.Math.Vector2;
+      const p1 = c[i] as Phaser.Math.Vector2;
       g.beginPath();
-      g.moveTo(cx, cy);
-      g.lineTo(p.x, p.y);
+      g.moveTo(p0.x, p0.y);
+      g.lineTo(p1.x, p1.y);
       g.strokePath();
     }
+    // a faint ring around the hub so the value reads as its own little dial
+    g.lineStyle(2 * this.s, INK, 0.22).strokeCircle(cx, cy, hub);
   }
 
   private nudgeVol(delta: number): void {
@@ -1915,11 +1925,11 @@ export class Game extends Scene {
     // The pad is a rounded button (same crayon shape as the rest) pinned to the EXACT centre of
     // the row; the wave options fill the space to its left, redoble + reset the space to its right.
     const rowMid = (rowL + rowR) / 2;
-    const padSz = edRowH; // a rounded square, a touch taller than the flat bars
+    const padSz = edRowH * 1.18; // a rounded square, bigger than the flat bars (they keep their size)
     this.padCx = rowMid;
     this.padCy = rowY;
     this.padR = padSz / 2;
-    this.padRIn = this.padR * 0.42; // the hub, left free for the readout
+    this.padRIn = this.padR * 0.46; // the hub, left clear for the readout
     const padW = padSz + 4 * s;
     const leftW = rowMid - padW / 2 - gap - rowL;
     const rightL = rowMid + padW / 2 + gap;
