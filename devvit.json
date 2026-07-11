@@ -20,6 +20,14 @@
     "dir": "dist/server",
     "entry": "index.cjs"
   },
+  "permissions": {
+    "realtime": true,
+    "redis": true,
+    "reddit": {
+      "enable": true,
+      "scope": "moderator"
+    }
+  },
   "menu": {
     "items": [
       {
