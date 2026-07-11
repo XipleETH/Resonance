@@ -213,7 +213,12 @@ function triggerTrack(track: number, step: number, time: number): void {
   triggerVoice(v.inst, v.synth, gain, filter, active.get(`${track}_${step}`), step, time);
 }
 
-/** Trigger the raw sound. Returns whether it's pitched (vibrato-eligible) and its base Hz. */
+/**
+ * Trigger the raw sound. `offset` is the per-beat pitch (in semitones for non-scale sounds):
+ * pitched sounds fold it into the day's scale; NON-melodic sounds keep their fixed base and just
+ * transpose this hit — so a drum/perc/animal can be tuned per beat without becoming melodic.
+ * Returns whether the note has a pitch (so vibrato can ride it) and its base Hz.
+ */
 function triggerBase(
   inst: Instrument,
   synth: AnySynth,
@@ -223,137 +228,150 @@ function triggerBase(
   offset = 0
 ): { pitched: boolean; baseHz: number } {
   if (synth instanceof Tone.NoiseSynth) {
+    // Noise has no note — its playback rate pitches the timbre up/down instead.
+    try {
+      synth.noise.playbackRate = Math.pow(2, offset / 12);
+    } catch {
+      /* older Tone without a settable rate */
+    }
     synth.triggerAttackRelease(dur ?? (inst.id === 'pah' || inst.id === 'clap' ? '8n' : '16n'), time);
     return { pitched: false, baseHz: 0 };
   }
   if (inst.recipe) {
-    applyRecipe(inst.recipe, inst, synth, step, time);
+    applyRecipe(inst.recipe, inst, synth, step, time, offset);
     return { pitched: false, baseHz: 0 };
   }
   const pitched = isPitched(inst);
-  const note = pitched ? scaleNote(rootPc, inst, step, offset) : (inst.note ?? 'C2');
+  // Pitched → the offset is a scale-degree; flat → transpose the fixed note by `offset` semitones.
+  const noteHz = pitched
+    ? hz(scaleNote(rootPc, inst, step, offset))
+    : Tone.Frequency(inst.note ?? 'C2').transpose(offset).toFrequency();
   synth.frequency.cancelScheduledValues(time);
-  synth.triggerAttackRelease(note, dur ?? '16n', time);
-  return { pitched, baseHz: hz(note) };
+  synth.triggerAttackRelease(noteHz, dur ?? '16n', time);
+  return { pitched, baseHz: noteHz };
 }
 
-function applyRecipe(r: string, inst: Instrument, synth: PitchedSynth, step: number, time: number): void {
+function applyRecipe(r: string, inst: Instrument, synth: PitchedSynth, step: number, time: number, offset = 0): void {
+  // Per-beat pitch also tunes these fixed gestures: transpose every frequency by `offset`
+  // semitones. The shape (the sweep) is unchanged — it just plays higher or lower.
+  const mul = Math.pow(2, offset / 12);
+  const H = (n: string): number => hz(n) * mul;
   const f = synth.frequency;
   switch (r) {
     case 'chirp': // bird — quick up-sweep
-      synth.triggerAttackRelease(hz('G5'), 0.1, time);
-      f.setValueAtTime(hz('G5'), time);
-      f.exponentialRampToValueAtTime(hz('E7'), time + 0.09);
+      synth.triggerAttackRelease(H('G5'), 0.1, time);
+      f.setValueAtTime(H('G5'), time);
+      f.exponentialRampToValueAtTime(H('E7'), time + 0.09);
       break;
     case 'meow': // cat — up then down
-      synth.triggerAttackRelease(hz('E4'), 0.3, time);
-      f.setValueAtTime(hz('E4'), time);
-      f.linearRampToValueAtTime(hz('A4'), time + 0.12);
-      f.linearRampToValueAtTime(hz('D4'), time + 0.28);
+      synth.triggerAttackRelease(H('E4'), 0.3, time);
+      f.setValueAtTime(H('E4'), time);
+      f.linearRampToValueAtTime(H('A4'), time + 0.12);
+      f.linearRampToValueAtTime(H('D4'), time + 0.28);
       break;
     case 'bark': // dog — short down-blip
-      synth.triggerAttackRelease(hz('C3'), 0.12, time);
-      f.setValueAtTime(hz('C3'), time);
-      f.exponentialRampToValueAtTime(hz('G2'), time + 0.08);
+      synth.triggerAttackRelease(H('C3'), 0.12, time);
+      f.setValueAtTime(H('C3'), time);
+      f.exponentialRampToValueAtTime(H('G2'), time + 0.08);
       break;
     case 'ribbit': // frog — croak wobble
-      synth.triggerAttackRelease(hz('A2'), 0.16, time);
-      f.setValueAtTime(hz('A2'), time);
-      f.linearRampToValueAtTime(hz('D3'), time + 0.06);
-      f.linearRampToValueAtTime(hz('A2'), time + 0.14);
+      synth.triggerAttackRelease(H('A2'), 0.16, time);
+      f.setValueAtTime(H('A2'), time);
+      f.linearRampToValueAtTime(H('D3'), time + 0.06);
+      f.linearRampToValueAtTime(H('A2'), time + 0.14);
       break;
     case 'drop': // fx — long down-lifter
-      synth.triggerAttackRelease(hz('C6'), 0.32, time);
-      f.setValueAtTime(hz('C6'), time);
-      f.exponentialRampToValueAtTime(hz('C3'), time + 0.3);
+      synth.triggerAttackRelease(H('C6'), 0.32, time);
+      f.setValueAtTime(H('C6'), time);
+      f.exponentialRampToValueAtTime(H('C3'), time + 0.3);
       break;
     case 'vox': // voice — follows the scale
-      synth.triggerAttackRelease(scaleNote(rootPc, inst, step), '8n', time);
+      synth.triggerAttackRelease(scaleNote(rootPc, inst, step, offset), '8n', time);
       break;
     case 'owl': // soft descending hoot
-      synth.triggerAttackRelease(hz('D4'), 0.35, time);
-      f.setValueAtTime(hz('D4'), time);
-      f.linearRampToValueAtTime(hz('B3'), time + 0.16);
+      synth.triggerAttackRelease(H('D4'), 0.35, time);
+      f.setValueAtTime(H('D4'), time);
+      f.linearRampToValueAtTime(H('B3'), time + 0.16);
       break;
     case 'duck': // quack down-blip
-      synth.triggerAttackRelease(hz('B3'), 0.14, time);
-      f.setValueAtTime(hz('B3'), time);
-      f.exponentialRampToValueAtTime(hz('F3'), time + 0.12);
+      synth.triggerAttackRelease(H('B3'), 0.14, time);
+      f.setValueAtTime(H('B3'), time);
+      f.exponentialRampToValueAtTime(H('F3'), time + 0.12);
       break;
     case 'cricket': // quick high chirp
-      synth.triggerAttackRelease(hz('B6'), 0.07, time);
+      synth.triggerAttackRelease(H('B6'), 0.07, time);
       break;
     case 'moo': // low falling
-      synth.triggerAttackRelease(hz('C3'), 0.42, time);
-      f.setValueAtTime(hz('E3'), time);
-      f.linearRampToValueAtTime(hz('C3'), time + 0.38);
+      synth.triggerAttackRelease(H('C3'), 0.42, time);
+      f.setValueAtTime(H('E3'), time);
+      f.linearRampToValueAtTime(H('C3'), time + 0.38);
       break;
     case 'baa': // bleaty wobble
-      synth.triggerAttackRelease(hz('E4'), 0.3, time);
-      f.setValueAtTime(hz('E4'), time);
-      f.linearRampToValueAtTime(hz('D4'), time + 0.06);
-      f.linearRampToValueAtTime(hz('E4'), time + 0.12);
-      f.linearRampToValueAtTime(hz('D4'), time + 0.18);
+      synth.triggerAttackRelease(H('E4'), 0.3, time);
+      f.setValueAtTime(H('E4'), time);
+      f.linearRampToValueAtTime(H('D4'), time + 0.06);
+      f.linearRampToValueAtTime(H('E4'), time + 0.12);
+      f.linearRampToValueAtTime(H('D4'), time + 0.18);
       break;
     case 'buzz': // sustained insect buzz
-      synth.triggerAttackRelease(hz('A2'), 0.3, time);
-      f.setValueAtTime(hz('A2'), time);
-      f.linearRampToValueAtTime(hz('B2'), time + 0.15);
-      f.linearRampToValueAtTime(hz('A2'), time + 0.3);
+      synth.triggerAttackRelease(H('A2'), 0.3, time);
+      f.setValueAtTime(H('A2'), time);
+      f.linearRampToValueAtTime(H('B2'), time + 0.15);
+      f.linearRampToValueAtTime(H('A2'), time + 0.3);
       break;
     case 'howl': // rise then fall
-      synth.triggerAttackRelease(hz('A3'), 0.6, time);
-      f.setValueAtTime(hz('A3'), time);
-      f.exponentialRampToValueAtTime(hz('E4'), time + 0.3);
-      f.linearRampToValueAtTime(hz('C4'), time + 0.58);
+      synth.triggerAttackRelease(H('A3'), 0.6, time);
+      f.setValueAtTime(H('A3'), time);
+      f.exponentialRampToValueAtTime(H('E4'), time + 0.3);
+      f.linearRampToValueAtTime(H('C4'), time + 0.58);
       break;
     case 'crow': // squawk up-down
-      synth.triggerAttackRelease(hz('C4'), 0.25, time);
-      f.setValueAtTime(hz('C4'), time);
-      f.linearRampToValueAtTime(hz('G4'), time + 0.1);
-      f.linearRampToValueAtTime(hz('D4'), time + 0.22);
+      synth.triggerAttackRelease(H('C4'), 0.25, time);
+      f.setValueAtTime(H('C4'), time);
+      f.linearRampToValueAtTime(H('G4'), time + 0.1);
+      f.linearRampToValueAtTime(H('D4'), time + 0.22);
       break;
     case 'bubble': // quick up
-      synth.triggerAttackRelease(hz('C5'), 0.1, time);
-      f.setValueAtTime(hz('C5'), time);
-      f.exponentialRampToValueAtTime(hz('C6'), time + 0.08);
+      synth.triggerAttackRelease(H('C5'), 0.1, time);
+      f.setValueAtTime(H('C5'), time);
+      f.exponentialRampToValueAtTime(H('C6'), time + 0.08);
       break;
     case 'drip': // short down plink
-      synth.triggerAttackRelease(hz('C6'), 0.12, time);
-      f.setValueAtTime(hz('C6'), time);
-      f.exponentialRampToValueAtTime(hz('G5'), time + 0.1);
+      synth.triggerAttackRelease(H('C6'), 0.12, time);
+      f.setValueAtTime(H('C6'), time);
+      f.exponentialRampToValueAtTime(H('G5'), time + 0.1);
       break;
     case 'laser': // fast down zap
-      synth.triggerAttackRelease(hz('C7'), 0.18, time);
-      f.setValueAtTime(hz('C7'), time);
-      f.exponentialRampToValueAtTime(hz('C4'), time + 0.16);
+      synth.triggerAttackRelease(H('C7'), 0.18, time);
+      f.setValueAtTime(H('C7'), time);
+      f.exponentialRampToValueAtTime(H('C4'), time + 0.16);
       break;
     case 'coin': // up blip (arcade coin)
-      synth.triggerAttackRelease(hz('E5'), 0.12, time);
-      f.setValueAtTime(hz('E5'), time);
-      f.exponentialRampToValueAtTime(hz('B5'), time + 0.06);
+      synth.triggerAttackRelease(H('E5'), 0.12, time);
+      f.setValueAtTime(H('E5'), time);
+      f.exponentialRampToValueAtTime(H('B5'), time + 0.06);
       break;
     case 'powerup': // rising sweep
-      synth.triggerAttackRelease(hz('C4'), 0.3, time);
-      f.setValueAtTime(hz('C4'), time);
-      f.exponentialRampToValueAtTime(hz('C6'), time + 0.28);
+      synth.triggerAttackRelease(H('C4'), 0.3, time);
+      f.setValueAtTime(H('C4'), time);
+      f.exponentialRampToValueAtTime(H('C6'), time + 0.28);
       break;
     case 'siren': // up and down
-      synth.triggerAttackRelease(hz('A4'), 0.4, time);
-      f.setValueAtTime(hz('A4'), time);
-      f.linearRampToValueAtTime(hz('E5'), time + 0.2);
-      f.linearRampToValueAtTime(hz('A4'), time + 0.38);
+      synth.triggerAttackRelease(H('A4'), 0.4, time);
+      f.setValueAtTime(H('A4'), time);
+      f.linearRampToValueAtTime(H('E5'), time + 0.2);
+      f.linearRampToValueAtTime(H('A4'), time + 0.38);
       break;
     case 'warp': // down then up
-      synth.triggerAttackRelease(hz('C5'), 0.3, time);
-      f.setValueAtTime(hz('C5'), time);
-      f.exponentialRampToValueAtTime(hz('C3'), time + 0.14);
-      f.exponentialRampToValueAtTime(hz('C5'), time + 0.28);
+      synth.triggerAttackRelease(H('C5'), 0.3, time);
+      f.setValueAtTime(H('C5'), time);
+      f.exponentialRampToValueAtTime(H('C3'), time + 0.14);
+      f.exponentialRampToValueAtTime(H('C5'), time + 0.28);
       break;
     case 'whistle': // slide up whistle
-      synth.triggerAttackRelease(hz('C6'), 0.35, time);
-      f.setValueAtTime(hz('G5'), time);
-      f.exponentialRampToValueAtTime(hz('C6'), time + 0.15);
+      synth.triggerAttackRelease(H('C6'), 0.35, time);
+      f.setValueAtTime(H('G5'), time);
+      f.exponentialRampToValueAtTime(H('C6'), time + 0.15);
       break;
     default:
       synth.triggerAttackRelease(inst.note ?? 'C4', '16n', time);
@@ -412,7 +430,8 @@ function triggerVoice(
         win
       );
     else if (fx.type === 'wah') applyRamps(filter.frequency, wahCurve(fx.depth, cyc), t, win);
-    else if (fx.type === 'vibrato' && base.pitched && base.baseHz > 0 && !(synth instanceof Tone.NoiseSynth))
+    // vibrato rides ANY sound that has a note — melodic OR a fixed-note drum/perc — just not pure noise
+    else if (fx.type === 'vibrato' && base.baseHz > 0 && !(synth instanceof Tone.NoiseSynth))
       applyRamps(synth.frequency, vibratoCurve(base.baseHz, fx.depth, cyc), t, win);
   }
 }
