@@ -66,14 +66,17 @@ const mulberry32 = (seed: number): (() => number) => {
   };
 };
 
-/** Generate today's random-but-musical base: 3 seeded tracks + 3 empty slots. */
+// A fresh base note (root of the pentatonic) per day — the whole jam transposes to it. Derived
+// from the DATE only (no postId), so the title can name it before the post is even opened.
+export const KEYS = ['C', 'D', 'E', 'F', 'G', 'A'];
+export const keyForDay = (day: string): string => KEYS[Math.floor(mulberry32(hashStr(day))() * KEYS.length)] ?? 'C';
+
+/** Generate today's random-but-musical base: 3 seeded tracks + a 4-beat starter groove. */
 async function seedJam(postId: string, now: number): Promise<void> {
   const day = todayStr(now);
   const rnd = mulberry32(hashStr(day + postId));
   const bpm = 88 + Math.floor(rnd() * 5) * 4; // 88..104 in steps of 4
-  // A fresh base note (root of the pentatonic) each day — the whole jam transposes to it.
-  const KEYS = ['C', 'D', 'E', 'F', 'G', 'A'];
-  const key = KEYS[Math.floor(mulberry32(hashStr(day))() * KEYS.length)] ?? 'C';
+  const key = keyForDay(day);
 
   // The day's pickable palette (a random 24 of the whole library, same for everyone).
   const pool = pickDailyPool(day);
@@ -94,8 +97,19 @@ async function seedJam(postId: string, now: number): Promise<void> {
     pool: pool.join(','),
   };
   for (let t = 0; t < TRACKS; t++) metaFields['inst' + t] = seededIds[t] ?? '';
-  // Start CLEAN: 3 instruments + a tempo, but NO notes — the community builds from zero.
   await redis.hSet(metaKey(postId), metaFields);
+
+  // A tiny 4-beat starter groove across the 3 seeded rows, so the day opens with a beat instead
+  // of silence (and isn't saturated). Attributed to 'seed' so it counts for nobody's ranking.
+  const starter: [number, number][] = [
+    [0, 0], // drum on beat 1
+    [0, 8], // drum on beat 3
+    [1, 0], // bass on beat 1
+    [2, 4], // melody on beat 2
+  ];
+  const gridFields: Record<string, string> = {};
+  for (const [tr, st] of starter) if ((seededIds[tr] ?? '') !== '') gridFields[`${tr}_${st}`] = 'seed';
+  if (Object.keys(gridFields).length) await redis.hSet(gridKey(postId), gridFields);
 }
 
 export async function getState(postId: string): Promise<JamState> {

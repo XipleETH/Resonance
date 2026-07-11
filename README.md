@@ -1,8 +1,8 @@
-# RESONANCE
+# JamPad
 
 **A song the whole subreddit writes, four tokens at a time.**
 
-Every day a bot posts a fresh RESONANCE loop — its own musical key, its own colour palette, its own
+Every day a bot posts a fresh JamPad loop — its own musical key, its own colour palette, its own
 24 sounds drawn from a library of 98. Everyone who scrolls past edits **the same 8-track × 16-step
 loop**, live. You get **4 tokens**, they refill every 12 hours, and whatever you place is heard by
 everyone else.
@@ -10,14 +10,14 @@ everyone else.
 **No song ever closes.** Scroll back a week and that post is still there, still in its own key, and
 still yours to edit. Nobody stages any of it. The community builds it, one token at a time.
 
-▶ **Play it:** [r/Resonance_app](https://www.reddit.com/r/Resonance_app/) · Built for Reddit's
+▶ **Play it:** [r/JamPad](https://www.reddit.com/r/JamPad/) · Built for Reddit's
 **Games with a Hook** hackathon.
 
 ---
 
 ## The hook
 
-Most music toys are solitary and infinite. RESONANCE is neither.
+Most music toys are solitary and infinite. JamPad is neither.
 
 - **It's collaborative by construction.** There is one loop per post, not one per player. You
   aren't making *your* track — you're arguing with strangers about *the* track, in four-token
@@ -143,7 +143,7 @@ src/
 ## Credits
 
 Scaffolded from the [Devvit Phaser starter](https://github.com/phaserjs/template-vite-ts). Typeface:
-[Gochi Hand](https://fonts.google.com/specimen/Gochi+Hand) (OFL). Every icon — and the RESONANCE
+[Gochi Hand](https://fonts.google.com/specimen/Gochi+Hand) (OFL). Every icon — and the JamPad
 wordmark, whose letters are built out of musical notation — was drawn for this app.
 
 Licensed under [BSD-3-Clause](./LICENSE).

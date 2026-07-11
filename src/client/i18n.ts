@@ -259,7 +259,7 @@ export type Guide = { intro: string; secs: GuideSec[] };
 
 const GUIDE_ES: Guide = {
   intro:
-    'RESONANCE es un jam colaborativo. Cada día nace un post nuevo, con su propia clave y sus propios colores, y todo el mundo edita el MISMO loop de 8 pistas × 16 pasos. Ningún post se cierra: puedes volver cualquier día a cualquier canción y seguir editándola. Lo que guardas lo oyen los demás.',
+    'JamPad es un jam colaborativo. Cada día nace un post nuevo, con su propia clave y sus propios colores, y todo el mundo edita el MISMO loop de 8 pistas × 16 pasos. Ningún post se cierra: puedes volver cualquier día a cualquier canción y seguir editándola. Lo que guardas lo oyen los demás.',
   secs: [
     {
       h: 'El tablero',
@@ -308,7 +308,7 @@ const GUIDE_ES: Guide = {
 
 const GUIDE_EN: Guide = {
   intro:
-    'RESONANCE is a collaborative jam. A new post is born every day, with its own key and its own colours, and everybody edits the SAME 8-track × 16-step loop. No post ever closes: come back any day, to any song, and keep editing it. Whatever you save, the others hear.',
+    'JamPad is a collaborative jam. A new post is born every day, with its own key and its own colours, and everybody edits the SAME 8-track × 16-step loop. No post ever closes: come back any day, to any song, and keep editing it. Whatever you save, the others hear.',
   secs: [
     {
       h: 'The board',

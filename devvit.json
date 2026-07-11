@@ -1,6 +1,6 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
-  "name": "resonance-pad",
+  "name": "jampad",
   "dev": {
     "subreddit": "resonance_pad_dev"
   },

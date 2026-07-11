@@ -1,5 +1,5 @@
 /**
- * Shared types + constants for the collaborative jam (RESONANCE).
+ * Shared types + constants for the collaborative jam (JamPad).
  * No DOM / Node deps — this file is imported by both client and server.
  */
 

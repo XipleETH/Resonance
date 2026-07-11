@@ -1,5 +1,5 @@
 /**
- * RESONANCE audio engine — plays the SHARED collaborative pattern.
+ * JamPad audio engine — plays the SHARED collaborative pattern.
  *
  * Lessons baked in from the on-device spike (Android Reddit webview):
  *  - polyphony ceiling ~8-12 voices → use ONE monophonic synth per track
