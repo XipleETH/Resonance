@@ -1115,6 +1115,7 @@ export class Game extends Scene {
   private subscribe(): void {
     if (!this.channel) return;
     try {
+      // Channel is the raw postId (a custom name is silently dropped by Devvit realtime).
       this.conn = connectRealtime<JamDiff>({ channel: this.channel, onMessage: (m) => this.applyDiff(m) });
     } catch {
       this.conn = null;

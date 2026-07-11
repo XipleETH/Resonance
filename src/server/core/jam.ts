@@ -24,8 +24,9 @@ const metaKey = (postId: string): string => `jam:${postId}:meta`;
 const gridKey = (postId: string): string => `jam:${postId}:grid`;
 const energyKey = (postId: string, userId: string): string => `jam:${postId}:energy:${userId}`;
 const presenceKey = (postId: string): string => `jam:${postId}:presence`;
-// Realtime channel names cannot contain ':' — use a hyphen (Redis keys keep the colons).
-export const channelFor = (postId: string): string => `jam-${postId}`;
+// Use the postId itself as the realtime channel (that's what Devvit's own docs do). A custom
+// name like `jam-<postId>` appeared to be dropped — send didn't error, but nothing was delivered.
+export const channelFor = (postId: string): string => postId;
 
 const intOr = (v: string | undefined, d: number): number => {
   if (v === undefined) return d;
