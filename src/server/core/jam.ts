@@ -71,6 +71,51 @@ const mulberry32 = (seed: number): (() => number) => {
 export const KEYS = ['C', 'D', 'E', 'F', 'G', 'A'];
 export const keyForDay = (day: string): string => KEYS[Math.floor(mulberry32(hashStr(day))() * KEYS.length)] ?? 'C';
 
+// The 3 rows the daily post seeds, IN ORDER: a DRUM, a BASS, a MELODY — a mini rhythm+bass+lead
+// band, NOT three melodies. Falls back to the pool's first entries if a category is absent. Pure
+// function of the pool (which is date-derived), so the post title can name them before it's opened.
+export function seededInstrumentsFromPool(pool: string[]): string[] {
+  const inCat = (cat: string): string | undefined => pool.find((id) => instrumentById(id)?.category === cat);
+  return [inCat('drum') ?? pool[0] ?? '', inCat('bass') ?? pool[1] ?? '', inCat('melody') ?? pool[2] ?? ''];
+}
+export const seededInstrumentsForDay = (day: string): string[] => seededInstrumentsFromPool(pickDailyPool(day));
+
+// Per-sound emoji for the daily title. The library's own `emoji` (legacy) covers the ~20 original
+// sounds; this fills in every sound added since (extra drums, basses, mallets, animals, nature, fx,
+// voice) so the 3-emoji title is genuinely varied instead of collapsing to a category fallback.
+const EMOJI_BY_ID: Record<string, string> = {
+  // extra drums
+  kick2: '🥁', snare2: '👏', hat2: '🎩', clap2: '👐',
+  // percussion
+  rim: '🥁', cowbell: '🛎️', conga: '🪘', bongo: '🪘', woodblock: '🪵', shaker: '🪇', tamb: '🪘',
+  clave: '🥢', ride: '🥁', crash: '💥', block: '🧱', tri: '🔺',
+  // basses
+  subsine: '🔉', reese: '🎛️', pluckbass: '🎸', growl: '😤', bass2: '🪚', bass3: '🎚️', wobble: '🌀',
+  // mallets / keys / leads / melody
+  marimba: '🎶', xylo: '🎼', kalimba: '🎵', musicbox: '🎁', saw: '🎹', square: '👾', harp: '🎻',
+  flute: '🪈', brass: '🎺', glock: '🎐', celesta: '✨', banjo: '🪕', sitar: '🎸', harmonica: '🎶',
+  epiano: '🎹', clav: '🎹', pluckhi: '🪕', lead2: '🎹', supersaw: '🎹', arp: '🎶',
+  // pads
+  organ: '🎹', padwarm: '🎛️', strings: '🎻', choir: '🎶', accordion: '🪗', bellpad: '🔔',
+  // animals
+  owl: '🦉', duck: '🦆', cricket: '🦗', cow: '🐄', sheep: '🐑', bee: '🐝', wolf: '🐺', rooster: '🐓',
+  // nature & fx
+  rain: '🌧️', wind: '💨', thunder: '⛈️', bubble: '🫧', drip: '💧', laser: '🔦', coin: '🪙',
+  powerup: '🍄', siren: '🚨', warp: '🛸', glitch: '📺', beep: '🤖', sparkle: '✨',
+  // voice
+  yeah: '🙌', whistle: '😗', hum: '😌', doo: '🎵', beatbox: '🎙️', ooh: '😮',
+};
+const CAT_EMOJI: Record<string, string> = {
+  drum: '🥁', perc: '🪘', bass: '🎸', melody: '🎹', pad: '🎛️', fx: '✨', animal: '🐾', voice: '🎤',
+};
+export const emojiForInstrument = (id: string): string => {
+  const inst = instrumentById(id);
+  return EMOJI_BY_ID[id] ?? inst?.emoji ?? (inst ? CAT_EMOJI[inst.category] : undefined) ?? '🎵';
+};
+/** The day's three seeded sounds as emoji, e.g. "🥁 🎸 🎹" — used in the daily post title. */
+export const titleEmojisForDay = (day: string): string =>
+  seededInstrumentsForDay(day).filter(Boolean).map(emojiForInstrument).join(' ');
+
 /** Generate today's random-but-musical base: 3 seeded tracks + a 4-beat starter groove. */
 async function seedJam(postId: string, now: number): Promise<void> {
   const day = todayStr(now);
@@ -80,9 +125,8 @@ async function seedJam(postId: string, now: number): Promise<void> {
 
   // The day's pickable palette (a random 24 of the whole library, same for everyone).
   const pool = pickDailyPool(day);
-  const inCat = (cat: string): string | undefined => pool.find((id) => instrumentById(id)?.category === cat);
-  // Seed 3 starter rows FROM the pool (a beat, a bass, a melody if present); rest empty.
-  const seededIds = [inCat('drum') ?? pool[0], inCat('bass') ?? pool[1], inCat('melody') ?? pool[2]];
+  // Seed 3 starter rows FROM the pool: a drum, a bass, a melody (same picks the title names).
+  const seededIds = seededInstrumentsFromPool(pool);
   const metaFields: Record<string, string> = {
     day,
     key,
