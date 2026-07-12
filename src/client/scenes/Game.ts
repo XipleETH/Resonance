@@ -326,13 +326,26 @@ export class Game extends Scene {
   // any tap into "stash what you tapped + go fullscreen", so the app is used expanded.
   private fsBtn: HTMLButtonElement | null = null;
   private inlineCatcher: HTMLButtonElement | null = null;
+  private desktopCache: boolean | null = null; // memoized isDesktop() (pointer type never changes)
   private wokeByPointer = false;
   private audioInitting = false;
   private readonly syncOnScroll = (): void => this.syncDomButtons();
-  // Real DOM gesture on the canvas (expanded mode): unlock audio, and resume a context
-  // that a no-gesture autoplay attempt may have left suspended.
+  // Real DOM gesture on the canvas: unlock audio, and resume a context that a no-gesture
+  // autoplay attempt may have left suspended. On a DESKTOP inline post the canvas is live
+  // (no catcher), so the first click also WAKES the post: activate() flips `active` before
+  // Phaser dispatches the same click in its loop, so that first click both starts the jam and
+  // performs its action instead of only waking it. `wokeByPointer` marks that waking click so
+  // the play/pause handler won't immediately re-pause the auto-started audio (see ppImg). This
+  // listener always runs first in a canvas gesture, so clearing the flag here on any non-waking
+  // click keeps it from leaking to a later play/pause tap.
   private readonly unlockAudio = (): void => {
-    this.ensureAudio();
+    if (this.isDesktop() && !this.active && this.webMode() !== 'expanded') {
+      this.activate();
+      this.wokeByPointer = true;
+    } else {
+      this.wokeByPointer = false;
+      this.ensureAudio();
+    }
     void resumeAudio();
   };
   private resetTimer: Phaser.Time.TimerEvent | undefined = undefined;
@@ -492,6 +505,14 @@ export class Game extends Scene {
     this.fsIcon = this.add.image(0, 0, 'ic_fs');
     this.ppImg = this.add.image(0, 0, 'cb_pill').setTint(0x8fd6a0).setInteractive({ useHandCursor: true });
     this.ppImg.on('pointerdown', () => {
+      // If this same gesture just woke the post (desktop inline), unlockAudio→activate() already
+      // started playback — don't toggle it straight back to pause. Mirrors the catcher's `woke`
+      // guard in onInlineTap. In every other mode wokeByPointer is false here → normal toggle.
+      if (this.wokeByPointer) {
+        this.wokeByPointer = false;
+        this.renderPlayPause();
+        return;
+      }
       if (this.gate()) this.togglePlayPause();
     });
     this.ppIcon = this.add.image(0, 0, 'ic_play');
@@ -681,6 +702,27 @@ export class Game extends Scene {
     } catch {
       return 'inline';
     }
+  }
+
+  /**
+   * Is this a desktop (mouse) client? Desktop browsers report a fine pointer; phones/tablets
+   * report coarse. On desktop the inline feed card has room + no feed-scroll gesture theft, so
+   * we run the FULL studio (editor and all) right in the post instead of forcing fullscreen.
+   * Memoized — the pointer type doesn't change mid-session. `?device=desktop|mobile` overrides.
+   */
+  private isDesktop(): boolean {
+    if (this.desktopCache !== null) return this.desktopCache;
+    let d = false;
+    try {
+      const q = new URLSearchParams(location.search).get('device');
+      if (q === 'desktop') d = true;
+      else if (q === 'mobile') d = false;
+      else d = window.matchMedia('(pointer: fine)').matches;
+    } catch {
+      d = false;
+    }
+    this.desktopCache = d;
+    return d;
   }
   private toggleFullscreen(ev: MouseEvent): void {
     try {
@@ -1072,9 +1114,10 @@ export class Game extends Scene {
     put(this.rankBtn, rb.x, rb.y, rb.width, rb.height, !this.instrMenuOpen);
     const sb = this.setImg.getBounds();
     put(this.setBtn, sb.x, sb.y, sb.width, sb.height, !this.instrMenuOpen);
-    // Inline: the catcher covers the whole canvas so any tap can expand. Expanded: hidden,
-    // so the canvas is interacted with directly (wave drag, etc.).
-    put(this.inlineCatcher, 0, 0, this.scale.width, this.scale.height, this.webMode() !== 'expanded' && !this.instrMenuOpen);
+    // MOBILE inline: the catcher covers the whole canvas so any tap wakes + expands. Expanded
+    // AND desktop inline: hidden, so the canvas is played directly (place beats, editor, etc.).
+    const catch_ = this.webMode() !== 'expanded' && !this.isDesktop() && !this.instrMenuOpen;
+    put(this.inlineCatcher, 0, 0, this.scale.width, this.scale.height, catch_);
   }
 
   private applyServerState(state: JamState): void {
@@ -1845,9 +1888,10 @@ export class Game extends Scene {
     // so short frames still get comfortably-sized chrome (title / buttons / BPM); portrait ≈ u.
     const s = Math.min(u, H / 560);
     this.s = s;
-    // Inline (in the feed) = compact preview: no FX chips, taller pads, controls low.
-    // Expanded (fullscreen, any device) = the complete studio, like the Android app.
-    const compact = this.webMode() !== 'expanded';
+    // Compact preview (no FX chips, taller pads, controls low) = MOBILE inline only. Expanded
+    // (any device) and DESKTOP inline both get the complete studio: desktop feed cards have the
+    // room and no feed-scroll gesture theft, so the app is played right in the post.
+    const compact = this.webMode() !== 'expanded' && !this.isDesktop();
     this.cameras.resize(W, H);
     this.bg.setSize(W, H);
 
