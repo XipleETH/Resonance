@@ -1967,43 +1967,35 @@ export class Game extends Scene {
     const gap = 8 * s;
     const barH = edRowH * 0.82; // the flat buttons (FX / onda / redoble / reset)
 
-    // ---- the editor is ONE centered cluster: [FX][wave] · (disc) · [redoble][reset], evenly
-    // gapped. Each control has a capped width, so on a wide desktop/fullscreen row the cluster
-    // stays a tidy group in the middle instead of stretching edge-to-edge and stranding the right
-    // controls; on a narrow phone row the caps don't bind and it fills the row. ----
+    // ---- the editor lives inside a centred BAND. On a wide desktop/fullscreen row we cap the band
+    // to a tidy width in the middle (so it isn't stretched edge-to-edge), and lay the controls out
+    // exactly like the phone does within it: the disc pinned to the centre, [FX][wave] FILLING the
+    // half to its left and [redoble][reset] FILLING the half to its right. On a narrow phone row the
+    // cap doesn't bind, the band IS the row, and it fills as before. Both halves are equal width, so
+    // the disc sits dead-centre and the two sides stay balanced at any width. ----
     const rowMid = (rowL + rowR) / 2;
+    const halfBand = Math.min(rowR - rowMid, 280 * s); // 280*s ⇒ a centred band up to ~560*s wide
+    const bandL = rowMid - halfBand;
+    const bandR = rowMid + halfBand;
     const padSz = edRowH * 1.18; // the disc: a rounded square, bigger than the flat bars
     const padW = padSz + 4 * s;
-    // capped target widths for the four flat bars (FX toggle, wave, redoble, reset)
-    let wFx = 190 * s;
-    let wWave = 168 * s;
-    let wSub = 112 * s;
-    let wRst = 54 * s;
-    const fixedW = padW + 4 * gap;
-    const avail = rowR - rowL;
-    if (wFx + wWave + wSub + wRst + fixedW > avail) {
-      // narrow row: shrink the flat bars (keep the disc + gaps) so the cluster just fills it.
-      const k = Math.max(0.2, (avail - fixedW) / (wFx + wWave + wSub + wRst));
-      wFx *= k;
-      wWave *= k;
-      wSub *= k;
-      wRst *= k;
-    }
-    const totalW = wFx + wWave + wSub + wRst + fixedW;
-    const x0 = rowMid - totalW / 2; // cluster start (== rowL when it fills a narrow row)
+    const leftW = rowMid - padW / 2 - gap - bandL; // the half to the disc's left
+    const rightW = bandR - (rowMid + padW / 2 + gap); // its right half (== leftW)
 
-    // the cluster's own faint panel (hugs the controls, not the whole row)
+    // the faint panel hugs the whole band
     this.edPanels.clear().setVisible(!compact);
     if (!compact) {
       const pT = rowY - barH / 2 - 3 * s;
       const pH = barH + 6 * s;
       this.edPanels.fillStyle(this.theme.panel, 0.4).lineStyle(2 * s, INK, 0.28);
-      this.edPanels.fillRoundedRect(x0 - 8 * s, pT, totalW + 16 * s, pH, 10 * s);
-      this.edPanels.strokeRoundedRect(x0 - 8 * s, pT, totalW + 16 * s, pH, 10 * s);
+      this.edPanels.fillRoundedRect(bandL - 8 * s, pT, bandR - bandL + 16 * s, pH, 10 * s);
+      this.edPanels.strokeRoundedRect(bandL - 8 * s, pT, bandR - bandL + 16 * s, pH, 10 * s);
     }
 
-    let x = x0;
-    // ---- FX effect-type toggle (vibrato | wah) ----
+    // ---- left half: FX effect-type toggle (vibrato | wah), then the wave preset (both fill it) ----
+    let x = bandL;
+    const wFx = leftW * 0.56;
+    const wWave = leftW - wFx - gap;
     const nFx = Math.max(1, this.fxChips.length);
     this.fxBox = { x, y: rowY - barH / 2, w: wFx, h: barH };
     this.fxPill.setVisible(!compact).setPosition(x + wFx / 2, rowY).setDisplaySize(wFx, barH);
@@ -2029,18 +2021,15 @@ export class Game extends Scene {
     }
     x += wFx + gap;
 
-    // ---- wave preset ----
     const waveName = wWave > 118 * s;
     this.waveBox = { x, y: rowY - barH / 2, w: wWave, h: barH };
     this.wavePill.setVisible(!compact).setPosition(x + wWave / 2, rowY).setDisplaySize(wWave, barH);
     this.waveTx.setVisible(!compact && waveName).setPosition(x + 10 * u, rowY).setFontSize(11 * s);
     this.waveG.setVisible(!compact);
-    x += wWave + gap;
 
-    // ---- centre: the vol/tono disc. ▲/▼ = volumen, ◀/▶ = tono around a hub that reads out
-    // whichever of the two you moved last. ----
-    const padCx = x + padW / 2;
-    this.padCx = padCx;
+    // ---- centre: the vol/tono disc, pinned to the row's EXACT centre. ▲/▼ = volumen, ◀/▶ = tono
+    // around a hub that reads out whichever of the two you moved last. ----
+    this.padCx = rowMid;
     this.padCy = rowY;
     this.padR = padSz / 2;
     this.padRIn = this.padR * 0.46; // the hub, left clear for the readout
@@ -2048,28 +2037,30 @@ export class Game extends Scene {
     const padIc = this.padR * 0.5;
     const hub = this.padRIn * 2;
     this.padLong = hub > 56 * s;
-    this.padPill.setVisible(!compact).setPosition(padCx, rowY).setDisplaySize(padSz, padSz);
+    this.padPill.setVisible(!compact).setPosition(rowMid, rowY).setDisplaySize(padSz, padSz);
     this.padG.setVisible(!compact);
-    this.padHit.setPosition(padCx, rowY).setSize(padSz, padSz);
+    this.padHit.setPosition(rowMid, rowY).setSize(padSz, padSz);
     if (this.padHit.input) this.padHit.input.enabled = !compact;
-    this.edVolUpIc.setVisible(!compact).setPosition(padCx, rowY - off).setDisplaySize(padIc, padIc);
-    this.edVolDnIc.setVisible(!compact).setPosition(padCx, rowY + off).setDisplaySize(padIc, padIc);
-    this.edPitchDnIc.setVisible(!compact).setPosition(padCx - off, rowY).setDisplaySize(padIc, padIc);
-    this.edPitchUpIc.setVisible(!compact).setPosition(padCx + off, rowY).setDisplaySize(padIc, padIc);
-    this.edPitchVal.setVisible(!compact).setPosition(padCx, rowY).setFontSize(Math.min(11 * s, hub * 0.5));
-    x += padW + gap;
+    this.edVolUpIc.setVisible(!compact).setPosition(rowMid, rowY - off).setDisplaySize(padIc, padIc);
+    this.edVolDnIc.setVisible(!compact).setPosition(rowMid, rowY + off).setDisplaySize(padIc, padIc);
+    this.edPitchDnIc.setVisible(!compact).setPosition(rowMid - off, rowY).setDisplaySize(padIc, padIc);
+    this.edPitchUpIc.setVisible(!compact).setPosition(rowMid + off, rowY).setDisplaySize(padIc, padIc);
+    this.edPitchVal.setVisible(!compact).setPosition(rowMid, rowY).setFontSize(Math.min(11 * s, hub * 0.5));
 
-    // ---- redoble (ratchet: 1–4 hits per step) ----
+    // ---- right half: redoble (ratchet 1–4 hits/step), then reset (both fill it) ----
+    let rx = rowMid + padW / 2 + gap;
+    const wSub = rightW * 0.6;
+    const wRst = rightW - wSub - gap;
     const subTxt = wSub > 74 * s;
-    this.edSub.setVisible(!compact).setPosition(x + wSub / 2, rowY).setDisplaySize(wSub, barH);
+    this.edSub.setVisible(!compact).setPosition(rx + wSub / 2, rowY).setDisplaySize(wSub, barH);
     const subIcSz = edRowH * 0.5;
-    this.edSubIc.setVisible(!compact).setPosition(subTxt ? x + wSub * 0.36 : x + wSub / 2, rowY).setDisplaySize(subIcSz, subIcSz);
-    this.edSubTx.setVisible(!compact && subTxt).setPosition(x + wSub * 0.62, rowY).setFontSize(11 * s);
-    x += wSub + gap;
+    this.edSubIc.setVisible(!compact).setPosition(subTxt ? rx + wSub * 0.36 : rx + wSub / 2, rowY).setDisplaySize(subIcSz, subIcSz);
+    this.edSubTx.setVisible(!compact && subTxt).setPosition(rx + wSub * 0.62, rowY).setFontSize(11 * s);
+    rx += wSub + gap;
 
-    // ---- reset (tap = flatten this beat's expression, hold = clear the whole draft) ----
-    this.resetImg.setVisible(!compact).setPosition(x + wRst / 2, rowY).setDisplaySize(wRst, barH);
-    this.resetText.setVisible(!compact).setPosition(x + wRst / 2, rowY).setFontSize(Math.min(20 * s, wRst * 0.5));
+    // reset: tap = flatten this beat's expression, hold = clear the whole draft
+    this.resetImg.setVisible(!compact).setPosition(rx + wRst / 2, rowY).setDisplaySize(wRst, barH);
+    this.resetText.setVisible(!compact).setPosition(rx + wRst / 2, rowY).setFontSize(Math.min(20 * s, wRst * 0.5));
 
     // ---- bottom bar: fichas + clock (left); play/pause, ranking, save (right) ----
     const dotGap = 18 * u;
