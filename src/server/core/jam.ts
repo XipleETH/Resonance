@@ -156,6 +156,12 @@ async function seedJam(postId: string, now: number): Promise<void> {
   if (Object.keys(gridFields).length) await redis.hSet(gridKey(postId), gridFields);
 }
 
+/** Just the jam's current version — a cheap poll so clients can detect they've fallen behind
+ *  (used as a realtime fallback where the native app web-view doesn't deliver realtime). */
+export async function getVersion(postId: string): Promise<number> {
+  return intOr(await redis.hGet(metaKey(postId), 'version'), 1);
+}
+
 export async function getState(postId: string): Promise<JamState> {
   const now = Date.now();
   let metaRaw = await redis.hGetAll(metaKey(postId));

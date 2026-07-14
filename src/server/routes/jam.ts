@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { context, reddit } from '@devvit/web/server';
-import { channelFor, commit, getEnergy, getState, heartbeat } from '../core/jam';
+import { channelFor, commit, getEnergy, getState, getVersion, heartbeat } from '../core/jam';
 import { getProfile, getRankings, upsertUser } from '../core/stats';
 import type { JamAction, JamCommitResponse, JamInitResponse, ProfileResponse, RankingsResponse } from '../../shared/jam';
 
@@ -63,9 +63,18 @@ jam.post('/commit', async (c) => {
 
 jam.post('/heartbeat', async (c) => {
   const { postId, userId } = context;
-  if (!postId || !userId) return c.json({ count: 0 });
-  const count = await heartbeat(postId, userId);
-  return c.json({ count });
+  if (!postId || !userId) return c.json({ count: 0, version: 0 });
+  // Return the live count AND the jam's version, so a client whose realtime isn't being
+  // delivered (native app web-view) can notice it's behind and pull the latest state.
+  const [count, version] = await Promise.all([heartbeat(postId, userId), getVersion(postId)]);
+  return c.json({ count, version });
+});
+
+// Lightweight full-state pull for the realtime fallback (no user upsert / avatar work).
+jam.get('/state', async (c) => {
+  const { postId } = context;
+  if (!postId) return c.json({ status: 'error', message: 'postId required' }, 400);
+  return c.json({ state: await getState(postId) });
 });
 
 jam.get('/rankings', async (c) => {

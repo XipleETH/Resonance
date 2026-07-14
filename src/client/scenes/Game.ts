@@ -220,6 +220,8 @@ export class Game extends Scene {
   private channel = '';
   private presence = 1;
   private conn: Connection | null = null;
+  private appliedVersion = 0; // highest jam version we've applied — drives the heartbeat resync fallback
+  private committing = false; // a commit is mid-flight — hold the resync fallback off until it lands
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private active = false; // "woken" — taps act; first touch only wakes (swallowed)
   private audioId = 'a' + Math.random().toString(36).slice(2);
@@ -609,6 +611,7 @@ export class Game extends Scene {
       const data = (await res.json()) as JamInitResponse;
       this.myUserId = data.userId;
       this.applyServerState(data.state);
+      this.appliedVersion = data.state.meta.version;
       this.energy = data.energy;
       this.channel = data.channel;
       this.subscribe();
@@ -717,7 +720,14 @@ export class Game extends Scene {
       const q = new URLSearchParams(location.search).get('device');
       if (q === 'desktop') d = true;
       else if (q === 'mobile') d = false;
-      else d = window.matchMedia('(pointer: fine)').matches;
+      else {
+        // iOS/iPadOS is touch-first — keep it on the mobile layout even when it reports a fine
+        // pointer (a paired trackpad, or Safari's "desktop site" where an iPad poses as a Mac).
+        const nav = navigator;
+        const ios =
+          /iP(hone|ad|od)/.test(nav.userAgent) || (nav.platform === 'MacIntel' && (nav.maxTouchPoints ?? 0) > 1);
+        d = !ios && window.matchMedia('(pointer: fine)').matches;
+      }
     } catch {
       d = false;
     }
@@ -1169,15 +1179,18 @@ export class Game extends Scene {
     const beat = async (): Promise<void> => {
       try {
         const res = await fetch('/api/jam/heartbeat', { method: 'POST' });
-        const data = (await res.json()) as { count: number };
+        const data = (await res.json()) as { count: number; version?: number };
         this.presence = data.count;
         this.renderHeader();
+        // Realtime fallback: if the server's version is ahead of ours, realtime didn't reach us
+        // (native app web-view) — pull the latest state so other people's saves still show up.
+        if (!this.committing && typeof data.version === 'number' && data.version > this.appliedVersion) await this.resyncState();
       } catch {
         /* ignore */
       }
     };
     void beat();
-    this.heartbeatTimer = setInterval(() => void beat(), 10_000);
+    this.heartbeatTimer = setInterval(() => void beat(), 5_000);
   }
 
   private applyDiff(d: JamDiff): void {
@@ -1190,8 +1203,32 @@ export class Game extends Scene {
       if (d.track >= 0 && d.track < TRACKS) this.instruments[d.track] = d.instrument;
     } else if (d.kind === 'tempo') this.bpm = d.bpm;
     else if (d.kind === 'presence') this.presence = d.count;
+    const v = (d as { version?: number }).version;
+    if (typeof v === 'number' && v > this.appliedVersion) this.appliedVersion = v;
     this.refreshEngine();
     this.renderAll();
+  }
+
+  /**
+   * Realtime fallback. Realtime (connectRealtime) is delivered fine in a browser but NOT always in
+   * the native Reddit app's web-view, so a save from someone else can go unseen there. The heartbeat
+   * reports the server's version; when we've fallen behind we pull the latest shared state here.
+   * Only the SHARED layer is replaced — the local draft (draftPlace/Remove/CellFx/Instr/Tempo) is
+   * untouched, so an in-progress edit isn't clobbered.
+   */
+  private async resyncState(): Promise<void> {
+    try {
+      const res = await fetch('/api/jam/state');
+      if (!res.ok) return;
+      const data = (await res.json()) as { state?: JamState };
+      if (!data.state) return;
+      this.applyServerState(data.state);
+      this.appliedVersion = data.state.meta.version;
+      if (this.audioReady) this.refreshEngine();
+      this.renderAll();
+    } catch {
+      /* ignore */
+    }
   }
 
   // ---- cell/ownership helpers --------------------------------------------
@@ -1575,6 +1612,7 @@ export class Game extends Scene {
     if (this.pendingCost() > this.energy) return this.flashNoFichas();
 
     this.foldDraftLocally();
+    this.committing = true; // hold the resync fallback off so it can't clobber our just-folded beats
     try {
       const res = await fetch('/api/jam/commit', {
         method: 'POST',
@@ -1584,10 +1622,13 @@ export class Game extends Scene {
       const data = (await res.json()) as JamCommitResponse;
       if (data.ok) {
         this.energy = data.energy;
+        if (typeof data.version === 'number' && data.version > this.appliedVersion) this.appliedVersion = data.version;
         this.toast(t('sent'), '#b6ffb6');
       } else this.toast(data.message ?? t('error'), '#ffd1d1');
     } catch {
       this.toast(t('offline'), '#ffe0a0');
+    } finally {
+      this.committing = false;
     }
     this.refreshEngine();
     this.renderAll();
